@@ -12,13 +12,21 @@ $run = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -N
 if (-not $run) { throw "clé de démarrage automatique absente" }
 
 Write-Host "Démarrage de l'application"
-$proc = Start-Process $exe -PassThru
+$stderr = Join-Path $env:RUNNER_TEMP "zsp-stderr.txt"
+if (-not $env:RUNNER_TEMP) { $stderr = Join-Path $env:TEMP "zsp-stderr.txt" }
+$proc = Start-Process $exe -PassThru -RedirectStandardError $stderr
+$log = Join-Path $env:APPDATA "ZimbraSmtpProxy\proxy.log"
 try {
   $client = $null
   for ($i = 0; $i -lt 30 -and -not $client; $i++) {
     try { $client = New-Object Net.Sockets.TcpClient("127.0.0.1", 1025) } catch { Start-Sleep -Seconds 1 }
   }
-  if (-not $client) { throw "le port 1025 ne s'est pas ouvert" }
+  if (-not $client) {
+    Write-Host "--- processus terminé : $($proc.HasExited)$(if ($proc.HasExited) { ", code $($proc.ExitCode)" })"
+    if (Test-Path $stderr) { Write-Host "--- stderr"; Get-Content $stderr }
+    if (Test-Path $log) { Write-Host "--- journal"; Get-Content $log }
+    throw "le port 1025 ne s'est pas ouvert"
+  }
   $stream = $client.GetStream()
   $reader = New-Object IO.StreamReader($stream)
   $writer = New-Object IO.StreamWriter($stream); $writer.NewLine = "`r`n"; $writer.AutoFlush = $true
@@ -37,7 +45,6 @@ try {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 }
 
-$log = Join-Path $env:APPDATA "ZimbraSmtpProxy\proxy.log"
 if (Test-Path $log) { Write-Host "--- journal"; Get-Content $log }
 
 Write-Host "Désinstallation silencieuse"
