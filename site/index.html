@@ -127,6 +127,9 @@ a { color: var(--accent); }
 .node span { color: var(--muted); font-size: 13px; }
 .node.me { border-color: var(--accent); }
 .arrow { align-self: center; color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: center; flex: 0 0 auto; }
+.window { display: grid; grid-template-columns: minmax(0, 340px) 1fr; gap: 24px; align-items: start; }
+.window img { border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .12); height: auto; }
+@media (max-width: 640px) { .window { grid-template-columns: 1fr; } }
 .points { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 70ch; }
 footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
 @media (max-width: 640px) { .arrow { flex-basis: 100%; } }
@@ -181,14 +184,11 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <div class="tray">
       <div class="menu" aria-label="Aperçu du menu">
         <div class="dis">● Passerelle active sur 127.0.0.1:1025</div>
-        <div class="dis">Zimbra joignable (84ms)</div>
+        <div class="dis">Zimbra joignable (84 ms)</div>
         <div class="sep"></div>
-        <div class="hl">Tester la connexion Zimbra</div>
+        <div class="hl">Ouvrir la configuration…</div>
+        <div>Tester la connexion Zimbra</div>
         <div>Arrêter la passerelle</div>
-        <div class="sep"></div>
-        <div class="sub">Paramètres</div>
-        <div>Configurer Thunderbird…</div>
-        <div>Ouvrir le journal</div>
         <div class="sep"></div>
         <div>Quitter</div>
       </div>
@@ -196,8 +196,21 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
         <div class="state"><img src="tray-green.png" alt=""><div><b>Vert</b> <span>passerelle active, Zimbra joignable</span></div></div>
         <div class="state"><img src="tray-orange.png" alt=""><div><b>Orange</b> <span>passerelle active, Zimbra injoignable</span></div></div>
         <div class="state"><img src="tray-grey.png" alt=""><div><b>Gris</b> <span>passerelle arrêtée</span></div></div>
-        <p style="font-size:14px;color:var(--muted)">Zimbra est testé au démarrage puis toutes les 5 minutes. Une notification signale la perte et le retour de la connexion. Le sous-menu <b>Paramètres</b> contient l'URL Zimbra, le port d'écoute et le lancement à l'ouverture de session.</p>
+        <p style="font-size:14px;color:var(--muted)">Zimbra est testé au démarrage puis toutes les 5 minutes. Une notification signale la perte et le retour de la connexion. Clic gauche sur l'icône : fenêtre de configuration ; clic droit : menu.</p>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fenêtre de configuration</h2>
+    <div class="window">
+      <img src="config-window.png" width="560" height="652" alt="Fenêtre de configuration : état de la passerelle et de Zimbra, adresse du serveur Zimbra, port d'écoute, lancement à l'ouverture de session, aide Thunderbird">
+      <ul class="points">
+        <li>État de la passerelle et de Zimbra en direct, avec démarrage/arrêt et test de connexion.</li>
+        <li>Adresse du serveur Zimbra, port d'écoute et lancement à l'ouverture de session. Une nouvelle adresse est testée avant d'être enregistrée.</li>
+        <li>Réglages Thunderbird à copier et accès au journal.</li>
+        <li>Suit le thème clair ou sombre de Windows. Utilise Microsoft Edge WebView2, déjà présent sur Windows 10 et 11.</li>
+      </ul>
     </div>
   </section>
 

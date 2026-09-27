@@ -20,10 +20,20 @@ Le message MIME est transmis tel quel (upload brut + `SendMsgRequest` avec
 | Orange | Passerelle active, Zimbra injoignable |
 | Grise | Passerelle arrêtée |
 
-Menu : état, test de connexion Zimbra, démarrer/arrêter, paramètres (URL
-Zimbra, port d'écoute, lancement à l'ouverture de session), aide Thunderbird,
-journal, quitter. Zimbra est testé au démarrage puis toutes les 5 minutes ;
-une notification signale la perte et le retour de la connexion.
+Clic gauche : fenêtre de configuration. Clic droit : menu (état, ouvrir la
+configuration, test de connexion Zimbra, démarrer/arrêter, quitter). Zimbra est
+testé au démarrage puis toutes les 5 minutes ; une notification signale la
+perte et le retour de la connexion.
+
+## Fenêtre de configuration
+
+![Fenêtre de configuration](site/config-window.png)
+
+Page HTML (`ui/settings.html`) affichée par Microsoft Edge WebView2, présent
+sur Windows 10 et 11 : état en direct, adresse Zimbra (testée avant
+enregistrement), port d'écoute, lancement à l'ouverture de session, réglages
+Thunderbird et journal. Elle suit le thème clair/sombre de Windows. Ouvert
+dans un navigateur, le fichier affiche un aperçu avec des données fictives.
 
 Configuration et journal : `%APPDATA%\ZimbraSmtpProxy\` (`config.json`,
 `proxy.log`).
@@ -73,7 +83,10 @@ git push origin v1.0.1
 
 | Fichier | Rôle |
 |---|---|
-| `main.go` | Icône de notification, menu, boîtes de dialogue |
+| `main.go` | Icône de notification, menu, notifications |
+| `settings.go` | Actions de la fenêtre de configuration (état, test, enregistrement) |
+| `ui_windows.go` | Fenêtre WebView2 et pont JavaScript ↔ Go |
+| `ui/settings.html` | Interface de la fenêtre de configuration |
 | `gateway.go` | Serveur SMTP et client SOAP Zimbra |
 | `config.go` | Lecture/écriture de `config.json` |
 | `platform_windows.go` | Instance unique, démarrage auto (clé `Run`) |

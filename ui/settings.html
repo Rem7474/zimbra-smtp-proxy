@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Zimbra SMTP Proxy</title>
+<style>
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --ink: #1b1f24;
+  --muted: #5f6873;
+  --line: #e1e4e8;
+  --field: #ffffff;
+  --field-line: #c9ced4;
+  --accent: #0f6cbd;
+  --accent-hover: #115ea3;
+  --accent-ink: #ffffff;
+  --subtle: #f0f2f5;
+  --ok: #107c10;
+  --off: #7a828c;
+  --warn: #8a5300;
+  --warn-bg: #fff4ce;
+  --warn-line: #f2d68a;
+  --err: #c42b1c;
+  --err-bg: #fde7e9;
+  --err-line: #f4b7bd;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #1c1c1c;
+    --surface: #2b2b2b;
+    --ink: #f3f3f3;
+    --muted: #a7aeb7;
+    --line: #3a3a3a;
+    --field: #313131;
+    --field-line: #4a4a4a;
+    --accent: #4ca0e0;
+    --accent-hover: #62adea;
+    --accent-ink: #0b1a26;
+    --subtle: #333333;
+    --ok: #6ccb5f;
+    --off: #8b939c;
+    --warn: #fce100;
+    --warn-bg: #433519;
+    --warn-line: #6b5520;
+    --err: #ff99a4;
+    --err-bg: #442726;
+    --err-line: #6e3a3a;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 14px/1.45 var(--font);
+  padding: 20px 20px 16px;
+  display: grid; gap: 14px;
+  user-select: none;
+}
+input, button { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 12px; padding: 0 2px 4px; }
+header svg { width: 36px; height: 36px; flex: none; }
+header h1 { font-size: 18px; font-weight: 600; margin: 0; line-height: 1.2; }
+header .ver { color: var(--muted); font-size: 12px; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 12px; }
+.card h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+
+.status-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: #d17a00; }
+.dot.err { background: var(--err); }
+.dot.busy { background: var(--off); animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: .3; } }
+.status-row b { font-weight: 600; display: block; }
+.status-row span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; user-select: text; }
+
+.alert { border-radius: 6px; padding: 10px 12px; display: grid; gap: 8px; font-size: 13px; }
+.alert.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
+.alert p { margin: 0; white-space: pre-line; user-select: text; }
+.alert .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.field { display: grid; gap: 4px; }
+.field label { font-weight: 500; }
+.field .hint { color: var(--muted); font-size: 12px; }
+.field .error { color: var(--err); font-size: 12px; }
+input[type=text], input[type=number] {
+  background: var(--field); border: 1px solid var(--field-line); border-bottom-width: 2px;
+  border-radius: 5px; padding: 6px 10px; width: 100%; min-width: 0; user-select: text;
+}
+input[type=number] { width: 110px; font-family: var(--mono); }
+input:focus { outline: none; border-bottom-color: var(--accent); }
+input[aria-invalid=true] { border-bottom-color: var(--err); }
+
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.switch { width: 40px; height: 20px; border-radius: 10px; border: 1px solid var(--field-line); background: var(--field); position: relative; flex: none; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
+.toggle input:checked + .switch { background: var(--accent); border-color: var(--accent); }
+.toggle input:checked + .switch::after { background: var(--accent-ink); transform: translateX(19px); }
+.toggle input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+button {
+  border: 1px solid var(--field-line); background: var(--field); border-radius: 5px;
+  padding: 5px 14px; cursor: pointer; white-space: nowrap;
+}
+button:hover:not(:disabled) { background: var(--subtle); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.link { border: 0; background: none; color: var(--accent); padding: 2px 0; }
+button.link:hover:not(:disabled) { background: none; text-decoration: underline; }
+
+.form-foot { display: flex; align-items: center; gap: 8px; }
+.form-foot .msg { flex: 1; font-size: 13px; color: var(--muted); }
+.form-foot .msg.ok { color: var(--ok); }
+
+dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
+dt { color: var(--muted); }
+dd { margin: 0; display: flex; align-items: center; gap: 8px; user-select: text; }
+dd code { font-family: var(--mono); background: var(--subtle); padding: 1px 6px; border-radius: 4px; }
+.note { margin: 0; color: var(--muted); font-size: 12.5px; }
+details.card { padding: 0; gap: 0; }
+details.card > summary { padding: 12px 16px; cursor: pointer; font-weight: 500; list-style: none; display: flex; justify-content: space-between; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after { content: "›"; color: var(--muted); transform: rotate(90deg); transition: transform .15s; }
+details.card[open] > summary::after { transform: rotate(-90deg); }
+details.card > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+details.card > :not(summary) { margin: 0 16px 14px; }
+details.card dl { margin-bottom: 10px; }
+
+footer { display: flex; justify-content: space-between; align-items: center; padding: 0 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 36 36" aria-hidden="true">
+    <circle cx="18" cy="18" r="17.3" fill="#1f6feb"/>
+    <rect x="9" y="11.5" width="18" height="13" rx=".6" fill="none" stroke="#fff" stroke-width="2.2"/>
+    <path d="M9 11.5 18 19.1 27 11.5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Zimbra SMTP Proxy</h1>
+    <div class="ver" id="version"></div>
+  </div>
+</header>
+
+<section class="card" aria-labelledby="h-status">
+  <h2 id="h-status">ÉTAT</h2>
+  <div class="status-row">
+    <div class="dot" id="gw-dot"></div>
+    <div><b id="gw-title">Passerelle</b><span id="gw-detail"></span></div>
+    <button id="gw-toggle" type="button">Démarrer</button>
+  </div>
+  <div class="status-row">
+    <div class="dot busy" id="z-dot"></div>
+    <div><b id="z-title">Zimbra</b><span id="z-detail"></span></div>
+    <button id="z-test" type="button">Tester</button>
+  </div>
+</section>
+
+<form class="card" id="form" aria-labelledby="h-settings" novalidate>
+  <h2 id="h-settings">PARAMÈTRES</h2>
+  <div class="field">
+    <label for="url">Serveur Zimbra</label>
+    <input type="text" id="url" spellcheck="false" autocomplete="off" placeholder="https://mail.exemple.fr">
+    <div class="error" id="url-error" hidden></div>
+  </div>
+  <div class="field">
+    <label for="port">Port d'écoute local</label>
+    <input type="number" id="port" min="1024" max="65535">
+    <div class="hint">Thunderbird doit utiliser ce port comme serveur sortant.</div>
+    <div class="error" id="port-error" hidden></div>
+  </div>
+  <label class="toggle" for="autostart">
+    <span>Lancer à l'ouverture de session Windows</span>
+    <input type="checkbox" id="autostart">
+    <span class="switch" aria-hidden="true"></span>
+  </label>
+  <div class="alert warn" id="confirm" hidden>
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button type="button" id="confirm-yes">Enregistrer quand même</button>
+      <button type="button" id="confirm-no">Corriger</button>
+    </div>
+  </div>
+  <div class="form-foot">
+    <div class="msg" id="form-msg" role="status"></div>
+    <button type="button" id="reset" disabled>Annuler</button>
+    <button type="submit" class="primary" id="save" disabled>Enregistrer</button>
+  </div>
+</form>
+
+<details class="card" id="tb">
+  <summary>Configurer Thunderbird</summary>
+  <dl>
+    <dt>Nom d'hôte</dt><dd><code>127.0.0.1</code><button type="button" class="link" data-copy="127.0.0.1">Copier</button></dd>
+    <dt>Port</dt><dd><code id="tb-port">1025</code><button type="button" class="link" id="copy-port">Copier</button></dd>
+    <dt>Sécurité</dt><dd>Aucune</dd>
+    <dt>Authentification</dt><dd>Mot de passe normal</dd>
+    <dt>Identifiant</dt><dd>Votre adresse Zimbra complète</dd>
+  </dl>
+  <p class="note">Paramètres des comptes → Serveur sortant (SMTP) → Ajouter. Puis, dans « Copies et dossiers » du compte, décochez « Placer une copie dans Envoyés » : Zimbra enregistre déjà le message.</p>
+</details>
+
+<footer>
+  <button type="button" class="link" id="open-log">Ouvrir le journal</button>
+  <button type="button" id="close">Fermer</button>
+</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+// ---- Pont avec Go (window.goCall est injecté par l'application) ----
+const pending = new Map();
+let seq = 0;
+function call(method, arg) {
+  if (!window.goCall) return demo(method, arg);
+  return new Promise((resolve) => {
+    const id = ++seq;
+    pending.set(id, resolve);
+    window.goCall(id, method, arg === undefined ? null : arg);
+  });
+}
+window.__goDone = (id, res) => { const r = pending.get(id); pending.delete(id); if (r) r(res); };
+window.__goState = (s) => render(s);
+
+// ---- Rendu ----
+let state = null;
+let saved = null; // valeurs enregistrées, référence pour « modifié »
+
+function render(s) {
+  state = s;
+  $("version").textContent = "Version " + s.version;
+
+  const gwDot = $("gw-dot");
+  if (s.portError) {
+    gwDot.className = "dot err";
+    $("gw-title").textContent = "Passerelle arrêtée";
+    $("gw-detail").textContent = s.portError;
+  } else if (s.running) {
+    gwDot.className = "dot ok";
+    $("gw-title").textContent = "Passerelle active";
+    $("gw-detail").textContent = "Écoute sur " + s.addr;
+  } else {
+    gwDot.className = "dot";
+    $("gw-title").textContent = "Passerelle arrêtée";
+    $("gw-detail").textContent = "Thunderbird ne peut pas envoyer de mail";
+  }
+  $("gw-toggle").textContent = s.running ? "Arrêter" : "Démarrer";
+
+  const zDot = $("z-dot");
+  zDot.className = "dot " + ({ ok: "ok", ko: "warn", unknown: "busy" })[s.zimbra];
+  $("z-title").textContent = ({ ok: "Zimbra joignable", ko: "Zimbra injoignable", unknown: "Zimbra : test en cours…" })[s.zimbra];
+  $("z-detail").textContent = s.zimbraURL.replace(/^https:\/\//, "") + (s.zimbraDetail ? " · " + s.zimbraDetail : "");
+
+  $("tb-port").textContent = s.port;
+
+  const next = { zimbraURL: s.zimbraURL, port: s.port, autostart: s.autostart };
+  if (!saved || !isDirty()) fillForm(next);
+  saved = next;
+  updateDirty();
+}
+
+function fillForm(v) {
+  $("url").value = v.zimbraURL;
+  $("port").value = v.port;
+  $("autostart").checked = v.autostart;
+}
+
+function formValues() {
+  return { zimbraURL: $("url").value.trim(), port: parseInt($("port").value, 10) || 0, autostart: $("autostart").checked };
+}
+
+function isDirty() {
+  if (!saved) return false;
+  const v = formValues();
+  return v.zimbraURL !== saved.zimbraURL || v.port !== saved.port || v.autostart !== saved.autostart;
+}
+
+function updateDirty() {
+  const dirty = isDirty();
+  $("save").disabled = !dirty && !(state && state.portError);
+  $("reset").disabled = !dirty;
+}
+
+function setFieldError(field, msg) {
+  for (const f of ["url", "port"]) {
+    const on = f === field && msg;
+    $(f + "-error").hidden = !on;
+    $(f + "-error").textContent = on ? msg : "";
+    $(f).setAttribute("aria-invalid", on ? "true" : "false");
+  }
+}
+
+function setMsg(text, ok) {
+  $("form-msg").textContent = text || "";
+  $("form-msg").className = "msg" + (ok ? " ok" : "");
+}
+
+// ---- Actions ----
+async function save(force) {
+  setFieldError(null);
+  $("confirm").hidden = true;
+  $("save").disabled = true;
+  setMsg("Vérification…");
+  const res = await call("save", Object.assign(formValues(), { force: !!force }));
+  if (res.warning) {
+    setMsg("");
+    $("confirm-text").textContent = res.warning;
+    $("confirm").hidden = false;
+    $("confirm-yes").focus();
+  } else if (!res.ok) {
+    setMsg("");
+    if (res.field) setFieldError(res.field, res.error); else setMsg(res.error);
+  } else {
+    saved = null;
+    render(res.state);
+    setMsg("Enregistré", true);
+    setTimeout(() => { if ($("form-msg").textContent === "Enregistré") setMsg(""); }, 2500);
+  }
+  updateDirty();
+}
+
+$("form").addEventListener("submit", (e) => { e.preventDefault(); save(false); });
+$("form").addEventListener("input", () => { setMsg(""); $("confirm").hidden = true; updateDirty(); });
+$("confirm-yes").addEventListener("click", () => save(true));
+$("confirm-no").addEventListener("click", () => { $("confirm").hidden = true; $("url").focus(); updateDirty(); });
+$("reset").addEventListener("click", () => { fillForm(saved); setFieldError(null); $("confirm").hidden = true; setMsg(""); updateDirty(); });
+
+$("gw-toggle").addEventListener("click", async () => {
+  $("gw-toggle").disabled = true;
+  render(await call("toggle"));
+  $("gw-toggle").disabled = false;
+});
+
+$("z-test").addEventListener("click", async () => {
+  const btn = $("z-test");
+  btn.disabled = true;
+  btn.textContent = "Test…";
+  $("z-dot").className = "dot busy";
+  const url = formValues().zimbraURL || state.zimbraURL;
+  const r = await call("test", url);
+  btn.disabled = false;
+  btn.textContent = "Tester";
+  if (url !== state.zimbraURL) {
+    // Test d'une adresse pas encore enregistrée : résultat sous le champ.
+    render(state);
+    setFieldError("url", r.ok ? "" : "Pas de réponse Zimbra : " + r.detail);
+    setMsg(r.ok ? "Adresse joignable (" + r.detail + "), pensez à enregistrer." : "", r.ok);
+  } else {
+    render(Object.assign({}, state, { zimbra: r.ok ? "ok" : "ko", zimbraDetail: r.detail }));
+  }
+});
+
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const t = document.createElement("textarea");
+    t.value = text; document.body.appendChild(t); t.select();
+    document.execCommand("copy"); t.remove();
+  }
+  const old = btn.textContent; btn.textContent = "Copié"; setTimeout(() => { btn.textContent = old; }, 1200);
+}
+document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copy(b.dataset.copy, b)));
+$("copy-port").addEventListener("click", (e) => copy(String(state.port), e.currentTarget));
+
+$("open-log").addEventListener("click", () => call("openLog"));
+$("close").addEventListener("click", () => call("close"));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") call("close"); });
+
+// ---- Aperçu hors application (navigateur) ----
+function demo(method, arg) {
+  const base = { running: true, addr: "127.0.0.1:1025", port: 1025, zimbraURL: "https://mail-etu.esisar.grenoble-inp.fr",
+    zimbra: "ok", zimbraDetail: "84 ms", autostart: true, version: "aperçu",
+    portError: "" };
+  demo.s = demo.s || base;
+  const r = {
+    state: () => demo.s,
+    test: () => ({ ok: true, url: arg, detail: "91 ms" }),
+    save: () => (demo.s = Object.assign({}, demo.s, arg, { running: true, addr: "127.0.0.1:" + arg.port, portError: "" }), { ok: true, state: demo.s }),
+    toggle: () => (demo.s = Object.assign({}, demo.s, { running: !demo.s.running, addr: demo.s.running ? "" : "127.0.0.1:" + demo.s.port })),
+  }[method];
+  return Promise.resolve(r ? r() : null);
+}
+
+call("state").then(render);
+</script>
+</body>
+</html>

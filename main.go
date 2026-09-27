@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -43,16 +41,18 @@ const (
 )
 
 type app struct {
-	cfg Config // modifié uniquement par la boucle de menu
-	gw  *Gateway
+	gw *Gateway
 
-	mu      sync.Mutex // protège zState/zDetail et les mises à jour de l'icône
+	opMu sync.Mutex // sérialise les actions (menu, fenêtre)
+
+	mu      sync.Mutex // protège les champs ci-dessous et l'icône
+	cfg     Config
 	zState  zimbraState
 	zDetail string
+	portErr string
+	uiPush  func(uiState) // fenêtre de configuration ouverte, sinon nil
 
-	mStatus, mZimbra, mTest, mToggle     *systray.MenuItem
-	mURL, mPort, mAutostart              *systray.MenuItem
-	mThunderbird, mLog, mQuit, mSettings *systray.MenuItem
+	mStatus, mZimbra, mOpen, mTest, mToggle, mQuit *systray.MenuItem
 }
 
 func main() {
@@ -88,49 +88,33 @@ func (a *app) onReady() {
 	a.mZimbra = systray.AddMenuItem("", "")
 	a.mZimbra.Disable()
 	systray.AddSeparator()
+	a.mOpen = systray.AddMenuItem("Ouvrir la configuration…", "")
 	a.mTest = systray.AddMenuItem("Tester la connexion Zimbra", "")
 	a.mToggle = systray.AddMenuItem("", "")
 	systray.AddSeparator()
-	a.mSettings = systray.AddMenuItem("Paramètres", "")
-	a.mURL = a.mSettings.AddSubMenuItem("URL du serveur Zimbra…", "")
-	a.mPort = a.mSettings.AddSubMenuItem("Port d'écoute local…", "")
-	a.mAutostart = a.mSettings.AddSubMenuItemCheckbox("Lancer à l'ouverture de session", "", autostartEnabled())
-	a.mThunderbird = systray.AddMenuItem("Configurer Thunderbird…", "")
-	a.mLog = systray.AddMenuItem("Ouvrir le journal", "")
-	systray.AddSeparator()
 	a.mQuit = systray.AddMenuItem("Quitter", "")
+	systray.SetOnTapped(a.openSettings) // clic gauche ; clic droit = menu
 
+	startErr := a.startGateway(a.cfg.ListenPort)
 	a.refresh()
+	if startErr != nil {
+		go errorBox("%s\n\nLe port est peut-être utilisé par un autre programme.\nChangez-le dans la fenêtre de configuration.", a.portError())
+	}
 	go a.menuLoop()
 	go a.pingLoop()
 }
 
-// menuLoop traite les clics un par un : les boîtes de dialogue sont modales
-// et la config n'est jamais modifiée en parallèle.
 func (a *app) menuLoop() {
-	if err := a.gw.Start(a.cfg.ListenPort); err != nil {
-		a.refresh()
-		a.portError(err)
-	}
-	a.refresh()
 	for {
 		select {
+		case <-a.mOpen.ClickedCh:
+			a.openSettings()
 		case <-a.mTest.ClickedCh:
-			a.testZimbra()
+			a.testFromMenu()
 		case <-a.mToggle.ClickedCh:
-			a.toggleGateway()
-		case <-a.mURL.ClickedCh:
-			a.editURL()
-		case <-a.mPort.ClickedCh:
-			a.editPort()
-		case <-a.mAutostart.ClickedCh:
-			a.toggleAutostart()
-		case <-a.mThunderbird.ClickedCh:
-			a.showThunderbirdHelp()
-		case <-a.mLog.ClickedCh:
-			if err := openFile(logPath()); err != nil {
-				errorBox("Impossible d'ouvrir le journal : %v", err)
-			}
+			a.opMu.Lock()
+			a.toggleGatewayLocked()
+			a.opMu.Unlock()
 		case <-a.mQuit.ClickedCh:
 			systray.Quit()
 			return
@@ -140,17 +124,38 @@ func (a *app) menuLoop() {
 
 // ---------- État et icône ----------
 
+func formatLatency(d time.Duration) string {
+	return fmt.Sprintf("%d ms", d.Milliseconds())
+}
+
+// refresh met à jour l'icône, le menu et la fenêtre ouverte.
 func (a *app) refresh() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	s := a.snapshotLocked()
+	push := a.uiPush
+	if a.mStatus != nil { // menu construit (absent dans les tests)
+		a.refreshTrayLocked(s)
+	}
+	a.mu.Unlock()
 
-	addr := a.gw.Status()
-	if addr == "" {
+	if push != nil {
+		push(s)
+	}
+}
+
+func (a *app) refreshTrayLocked(s uiState) {
+	switch {
+	case s.PortError != "":
+		a.mStatus.SetTitle("⚠ Passerelle arrêtée : échec du démarrage")
+	case !s.Running:
 		a.mStatus.SetTitle("○ Passerelle arrêtée")
-		a.mToggle.SetTitle("Démarrer la passerelle")
-	} else {
-		a.mStatus.SetTitle("● Passerelle active sur " + addr)
+	default:
+		a.mStatus.SetTitle("● Passerelle active sur " + s.Addr)
+	}
+	if s.Running {
 		a.mToggle.SetTitle("Arrêter la passerelle")
+	} else {
+		a.mToggle.SetTitle("Démarrer la passerelle")
 	}
 
 	var zimbra string
@@ -165,7 +170,7 @@ func (a *app) refresh() {
 	a.mZimbra.SetTitle(zimbra)
 
 	switch {
-	case addr == "":
+	case !s.Running:
 		systray.SetIcon(iconStopped)
 	case a.zState == zKO:
 		systray.SetIcon(iconWarn)
@@ -173,8 +178,8 @@ func (a *app) refresh() {
 		systray.SetIcon(iconOK)
 	}
 	status := "arrêtée"
-	if addr != "" {
-		status = addr
+	if s.Running {
+		status = s.Addr
 	}
 	systray.SetTooltip(fmt.Sprintf("%s — %s\n%s", appName, status, zimbra))
 }
@@ -191,7 +196,7 @@ func (a *app) checkZimbra() (prev, cur zimbraState, detail string) {
 	if err != nil {
 		a.zState, a.zDetail = zKO, err.Error()
 	} else {
-		a.zState, a.zDetail = zOK, d.Round(time.Millisecond).String()
+		a.zState, a.zDetail = zOK, formatLatency(d)
 	}
 	cur, detail = a.zState, a.zDetail
 	a.mu.Unlock()
@@ -219,137 +224,13 @@ func (a *app) pingLoop() {
 	}
 }
 
-// ---------- Actions du menu ----------
-
-func (a *app) testZimbra() {
+func (a *app) testFromMenu() {
 	_, cur, detail := a.checkZimbra()
-	url := a.gw.ZimbraURL()
 	if cur == zOK {
-		zenity.Info(fmt.Sprintf("Zimbra répond.\n\n%s\nTemps de réponse : %s", url, detail),
-			zenity.Title(appName), zenity.InfoIcon)
+		zenity.Notify("Zimbra répond ("+detail+").", zenity.Title(appName), zenity.InfoIcon)
 	} else {
-		errorBox("Zimbra ne répond pas.\n\n%s\n%s", url, detail)
+		zenity.Notify("Zimbra ne répond pas : "+detail, zenity.Title(appName), zenity.WarningIcon)
 	}
-}
-
-func (a *app) toggleGateway() {
-	if a.gw.Status() != "" {
-		a.gw.Stop()
-	} else if err := a.gw.Start(a.cfg.ListenPort); err != nil {
-		a.portError(err)
-	}
-	a.refresh()
-}
-
-func (a *app) editURL() {
-	s, err := zenity.Entry("URL du serveur Zimbra :", zenity.Title(appName), zenity.EntryText(a.cfg.ZimbraURL))
-	if err != nil {
-		return // annulé
-	}
-	u, err := normalizeZimbraURL(s)
-	if err != nil {
-		errorBox("%v", err)
-		return
-	}
-	if u == a.cfg.ZimbraURL {
-		return
-	}
-	if strings.HasPrefix(u, "http://") && zenity.Question(
-		"Cette URL n'est pas en HTTPS : vos mots de passe circuleront en clair.\n\nContinuer quand même ?",
-		zenity.Title(appName), zenity.WarningIcon, zenity.DefaultCancel()) != nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-	_, perr := PingZimbra(ctx, u)
-	cancel()
-	if perr != nil && zenity.Question(
-		fmt.Sprintf("%s ne répond pas comme un serveur Zimbra :\n%v\n\nEnregistrer quand même ?", u, perr),
-		zenity.Title(appName), zenity.WarningIcon, zenity.DefaultCancel()) != nil {
-		return
-	}
-
-	a.cfg.ZimbraURL = u
-	a.gw.SetZimbraURL(u)
-	a.saveConfig()
-	log.Printf("URL Zimbra changée: %s", u)
-	a.checkZimbra()
-}
-
-func (a *app) editPort() {
-	s, err := zenity.Entry("Port d'écoute local (1024-65535) :", zenity.Title(appName),
-		zenity.EntryText(strconv.Itoa(a.cfg.ListenPort)))
-	if err != nil {
-		return
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(s))
-	if err == nil {
-		err = validPort(port)
-	}
-	if err != nil {
-		errorBox("Port invalide : %s", strings.TrimSpace(s))
-		return
-	}
-	if port == a.cfg.ListenPort {
-		return
-	}
-	if a.gw.Status() != "" {
-		old := a.cfg.ListenPort
-		a.gw.Stop()
-		if err := a.gw.Start(port); err != nil {
-			a.gw.Start(old)
-			a.refresh()
-			a.portErrorAt(port, err)
-			return
-		}
-	}
-	a.cfg.ListenPort = port
-	a.saveConfig()
-	a.refresh()
-	zenity.Info(fmt.Sprintf("Port changé en %d.\nPensez à mettre à jour le serveur sortant dans Thunderbird.", port),
-		zenity.Title(appName), zenity.InfoIcon)
-}
-
-func (a *app) toggleAutostart() {
-	on := !a.mAutostart.Checked()
-	if err := setAutostart(on); err != nil {
-		errorBox("Impossible de modifier le démarrage automatique : %v", err)
-		return
-	}
-	if on {
-		a.mAutostart.Check()
-	} else {
-		a.mAutostart.Uncheck()
-	}
-}
-
-func (a *app) showThunderbirdHelp() {
-	zenity.Info(fmt.Sprintf(`Paramètres du compte → Serveur sortant (SMTP) → Ajouter :
-
-  Nom d'hôte : 127.0.0.1
-  Port : %d
-  Sécurité de la connexion : Aucune
-  Méthode d'authentification : Mot de passe normal
-  Nom d'utilisateur : votre adresse Zimbra complète
-
-Puis, dans « Copies et dossiers » du compte, décochez
-« Placer une copie dans Envoyés » : Zimbra enregistre déjà
-le message dans vos Envoyés.`, a.cfg.ListenPort),
-		zenity.Title("Configurer Thunderbird"), zenity.InfoIcon)
-}
-
-// ---------- Utilitaires ----------
-
-func (a *app) saveConfig() {
-	if err := a.cfg.save(); err != nil {
-		errorBox("Impossible d'enregistrer la configuration : %v", err)
-	}
-}
-
-func (a *app) portError(err error) { a.portErrorAt(a.cfg.ListenPort, err) }
-
-func (a *app) portErrorAt(port int, err error) {
-	log.Printf("écoute port %d: %v", port, err)
-	errorBox("Impossible d'écouter sur le port %d :\n%v\n\nLe port est peut-être utilisé par un autre programme.\nChangez-le dans Paramètres → Port d'écoute local.", port, err)
 }
 
 func errorBox(format string, args ...any) {
