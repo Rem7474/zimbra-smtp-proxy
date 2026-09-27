@@ -13,8 +13,10 @@ import (
 // temporaire, passerelle démarrée sur un port libre.
 func newTestApp(t *testing.T, zimbraURL string) *app {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir) // Linux
+	t.Setenv("APPDATA", dir)         // Windows
+	t.Setenv("HOME", dir)            // macOS
 	a := &app{cfg: Config{ZimbraURL: zimbraURL, ListenPort: freePort(t)}, gw: NewGateway(zimbraURL)}
 	if err := a.startGateway(a.cfg.ListenPort); err != nil {
 		t.Fatal(err)

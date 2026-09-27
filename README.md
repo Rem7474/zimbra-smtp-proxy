@@ -34,6 +34,7 @@ sur Windows 10 et 11 : état en direct, adresse Zimbra (testée avant
 enregistrement), port d'écoute, lancement à l'ouverture de session, réglages
 Thunderbird et journal. Elle suit le thème clair/sombre de Windows. Ouvert
 dans un navigateur, le fichier affiche un aperçu avec des données fictives.
+`zimbra-smtp-proxy.exe --settings` ouvre la fenêtre dès le démarrage.
 
 Configuration et journal : `%APPDATA%\ZimbraSmtpProxy\` (`config.json`,
 `proxy.log`).

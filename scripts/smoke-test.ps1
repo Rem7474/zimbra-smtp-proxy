@@ -1,9 +1,13 @@
 # Test de fumée sur Windows : installation silencieuse, démarrage, dialogue
-# SMTP sur 127.0.0.1:1025, puis désinstallation. Utilisé par la CI.
+# SMTP sur 127.0.0.1:1025, ouverture de la fenêtre WebView2, puis
+# désinstallation. Utilisé par la CI.
 $ErrorActionPreference = "Stop"
 $setup = Join-Path $PSScriptRoot "..\dist\ZimbraSmtpProxy-Setup.exe"
 $appDir = Join-Path $env:LOCALAPPDATA "Programs\ZimbraSmtpProxy"
 $exe = Join-Path $appDir "zimbra-smtp-proxy.exe"
+
+# Part d'une configuration vierge (valeurs par défaut).
+Remove-Item (Join-Path $env:APPDATA "ZimbraSmtpProxy") -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Installation silencieuse"
 Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=autostart" -Wait
@@ -14,7 +18,7 @@ if (-not $run) { throw "clé de démarrage automatique absente" }
 Write-Host "Démarrage de l'application"
 $stderr = Join-Path $env:RUNNER_TEMP "zsp-stderr.txt"
 if (-not $env:RUNNER_TEMP) { $stderr = Join-Path $env:TEMP "zsp-stderr.txt" }
-$proc = Start-Process $exe -PassThru -RedirectStandardError $stderr
+$proc = Start-Process $exe -ArgumentList "--settings" -PassThru -RedirectStandardError $stderr
 $log = Join-Path $env:APPDATA "ZimbraSmtpProxy\proxy.log"
 try {
   $client = $null
@@ -41,6 +45,21 @@ try {
   if ($resp.StartsWith("250")) { throw "MAIL accepté sans authentification" }
   $writer.WriteLine("QUIT")
   $client.Close()
+
+  Write-Host "Fenêtre de configuration (WebView2)"
+  $webview = $null
+  for ($i = 0; $i -lt 30 -and -not $webview; $i++) {
+    Start-Sleep -Seconds 1
+    $webview = Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object ParentProcessId -eq $proc.Id
+  }
+  if (-not $webview) { throw "aucun processus WebView2 lancé par l'application" }
+  for ($i = 0; $i -lt 20 -and -not (Select-String -Path $log -Pattern "fenêtre de configuration chargée" -Quiet); $i++) {
+    Start-Sleep -Seconds 1
+  }
+  if (-not (Select-String -Path $log -Pattern "fenêtre de configuration chargée" -Quiet)) {
+    throw "la page n'a pas appelé l'application (pont JavaScript/Go)"
+  }
+  Write-Host "  page chargée, pont JavaScript/Go opérationnel"
 } finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 }

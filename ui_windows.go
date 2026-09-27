@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -65,6 +66,10 @@ func dpiScale() float64 {
 func (a *app) runSettingsWindow() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	// WebView2 exige COM en mode STA sur le thread qui crée la fenêtre.
+	if err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED); err == nil {
+		defer windows.CoUninitialize()
+	}
 	defer func() {
 		settingsWin.Lock()
 		settingsWin.open, settingsWin.hwnd = false, 0
@@ -89,6 +94,7 @@ func (a *app) runSettingsWindow() {
 		},
 	})
 	if w == nil {
+		log.Printf("WebView2 indisponible")
 		errorBox("La fenêtre de configuration nécessite Microsoft Edge WebView2 Runtime.\n\nTéléchargement : %s", webview2Download)
 		return
 	}

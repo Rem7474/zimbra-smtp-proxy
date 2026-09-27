@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -99,6 +100,9 @@ func (a *app) onReady() {
 	a.refresh()
 	if startErr != nil {
 		go errorBox("%s\n\nLe port est peut-être utilisé par un autre programme.\nChangez-le dans la fenêtre de configuration.", a.portError())
+	}
+	if slices.Contains(os.Args[1:], "--settings") {
+		a.openSettings()
 	}
 	go a.menuLoop()
 	go a.pingLoop()

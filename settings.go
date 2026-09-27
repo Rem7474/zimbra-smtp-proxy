@@ -49,6 +49,7 @@ func (a *app) handleUI(method string, arg json.RawMessage) any {
 	defer a.opMu.Unlock()
 	switch method {
 	case "state":
+		log.Printf("fenêtre de configuration chargée")
 		return a.snapshot()
 	case "toggle":
 		a.toggleGatewayLocked()
