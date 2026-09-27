@@ -1,0 +1,10 @@
+changelog:
+  exclude:
+    authors: [dependabot]
+  categories:
+    - title: Nouveautés
+      labels: [enhancement, feature]
+    - title: Corrections
+      labels: [bug, fix]
+    - title: Autres changements
+      labels: ["*"]

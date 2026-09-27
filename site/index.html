@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zimbra SMTP Proxy</title>
+<meta name="description" content="Passerelle SMTP locale pour Thunderbird qui envoie vos mails via l'API de Zimbra quand le SMTP du serveur n'est pas accessible.">
+<meta property="og:title" content="Zimbra SMTP Proxy">
+<meta property="og:description" content="Envoyer ses mails Zimbra depuis Thunderbird sans accès au SMTP du serveur.">
+<meta property="og:image" content="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --ink: #18202b;
+  --muted: #5a6573;
+  --line: #dde3ea;
+  --accent: #1f6feb;
+  --accent-ink: #ffffff;
+  --code-bg: #eef2f7;
+  --ok: #1a7f37;
+  --warn: #b86a00;
+  --off: #6e7781;
+  --menu-bg: #f9f9f9;
+  --menu-hover: #e5f0ff;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #11161d; --surface: #19202a; --ink: #e6ebf1; --muted: #9aa6b4;
+    --line: #2a3441; --accent: #4c8dff; --accent-ink: #0b1220; --code-bg: #1f2833;
+    --ok: #3fb95a; --warn: #e39a2d; --off: #8b949e; --menu-bg: #242b35; --menu-hover: #2c3a50;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #11161d; --surface: #19202a; --ink: #e6ebf1; --muted: #9aa6b4;
+  --line: #2a3441; --accent: #4c8dff; --accent-ink: #0b1220; --code-bg: #1f2833;
+  --ok: #3fb95a; --warn: #e39a2d; --off: #8b949e; --menu-bg: #242b35; --menu-hover: #2c3a50;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--sans);
+  padding-inline: 16px; padding-block: 40px 64px;
+}
+main { max-width: 860px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2 { text-wrap: balance; margin: 0; font-weight: 600; }
+h1 { font-size: 30px; line-height: 1.2; }
+h2 { font-size: 19px; }
+p { margin: 0; max-width: 66ch; }
+code, pre, kbd { font-family: var(--mono); font-size: 13px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; margin: 0; overflow-x: auto; line-height: 1.5; }
+section { display: grid; gap: 14px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+
+header { display: flex; gap: 18px; align-items: center; }
+header img { width: 56px; height: 56px; flex: none; }
+header .lede { color: var(--muted); margin-top: 6px; }
+
+.downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.dl { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+.dl h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.dl p { color: var(--muted); font-size: 14px; }
+.dl .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+button {
+  font: 500 14px var(--sans); cursor: pointer; justify-self: start;
+  background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 8px 14px;
+}
+button:hover { filter: brightness(1.08); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: default; }
+.msg { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+
+.tray { display: grid; grid-template-columns: minmax(0, 300px) 1fr; gap: 24px; align-items: start; }
+.menu {
+  background: var(--menu-bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 0; font: 13px var(--sans); box-shadow: 0 6px 20px rgb(0 0 0 / .12);
+}
+.menu div { padding: 5px 16px 5px 30px; position: relative; }
+.menu .dis { color: var(--muted); }
+.menu .hl { background: var(--menu-hover); }
+.menu .sep { height: 1px; background: var(--line); margin: 4px 0; padding: 0; }
+.menu .sub::after { content: "›"; position: absolute; right: 12px; color: var(--muted); }
+.states { display: grid; gap: 10px; }
+.state { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center; }
+.state img { width: 28px; height: 28px; }
+.state b { font-weight: 600; }
+.state span { color: var(--muted); font-size: 14px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.tablewrap { overflow-x: auto; }
+td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { color: var(--muted); white-space: nowrap; padding-right: 20px; }
+
+.checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 22px 1fr; }
+.checks .y { color: var(--ok); font-weight: 600; }
+.checks .n { color: var(--warn); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .tray { grid-template-columns: 1fr; }
+  h1 { font-size: 25px; }
+}
+</style>
+<style>
+body { margin: 0; }
+img { max-width: 100%; }
+a { color: var(--accent); }
+.dl a.btn {
+  font: 500 14px var(--sans); justify-self: start; text-decoration: none;
+  background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 8px 14px;
+}
+.dl a.btn:hover { filter: brightness(1.08); }
+.dl a.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; display: grid; gap: 2px; flex: 1 1 170px; }
+.node b { font-weight: 600; font-size: 14px; }
+.node span { color: var(--muted); font-size: 13px; }
+.node.me { border-color: var(--accent); }
+.arrow { align-self: center; color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: center; flex: 0 0 auto; }
+.points { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 70ch; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+@media (max-width: 640px) { .arrow { flex-basis: 100%; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icon.png" alt="">
+    <div>
+      <div class="eyebrow"><span id="version">Dernière version</span> · Windows 10/11 x64</div>
+      <h1>Zimbra SMTP Proxy</h1>
+      <p class="lede">Passerelle SMTP locale pour Thunderbird qui envoie vos mails via l'API SOAP de Zimbra quand le SMTP du serveur n'est pas accessible.</p>
+    </div>
+  </header>
+
+  <section>
+    <h2>Téléchargements</h2>
+    <div class="downloads">
+      <div class="dl">
+        <h3>Installeur</h3>
+        <p>Installation par utilisateur, sans droits administrateur. Non signé : Windows SmartScreen demande une confirmation au premier lancement (« Informations complémentaires » → « Exécuter quand même »).</p>
+        <a class="btn" href="https://github.com/Rem7474/zimbra-smtp-proxy/releases/latest/download/ZimbraSmtpProxy-Setup.exe">Télécharger l'installeur</a>
+      </div>
+      <div class="dl">
+        <h3>Exécutable seul</h3>
+        <p>Sans installation : lancez <code>zimbra-smtp-proxy.exe</code> depuis n'importe quel dossier. Les sommes SHA-256 et l'attestation de build sont jointes à chaque version.</p>
+        <a class="btn" href="https://github.com/Rem7474/zimbra-smtp-proxy/releases/latest/download/zimbra-smtp-proxy.exe">Télécharger l'exe</a>
+      </div>
+    </div>
+    <p style="font-size:14px;color:var(--muted)">Toutes les versions et notes de publication : <a href="https://github.com/Rem7474/zimbra-smtp-proxy/releases">page des releases</a>.</p>
+  </section>
+
+  <section>
+    <h2>Fonctionnement</h2>
+    <div class="flow" role="img" aria-label="Thunderbird envoie en SMTP à la passerelle locale, qui transmet à Zimbra en HTTPS">
+      <div class="node"><b>Thunderbird</b><span>serveur sortant 127.0.0.1:1025</span></div>
+      <div class="arrow">SMTP local →</div>
+      <div class="node me"><b>Zimbra SMTP Proxy</b><span>zone de notification</span></div>
+      <div class="arrow">HTTPS · SOAP →</div>
+      <div class="node"><b>Zimbra</b><span>AuthRequest, upload, SendMsgRequest</span></div>
+    </div>
+    <ul class="points">
+      <li>Le message est transmis tel que Thunderbird l'a écrit : pièces jointes, HTML, Cc, Cci et fils de discussion sont conservés.</li>
+      <li>La passerelle écoute uniquement sur <code>127.0.0.1</code> : aucune autre machine du réseau ne peut s'en servir.</li>
+      <li>Le mot de passe n'est jamais enregistré. Il sert à ouvrir une session Zimbra dont le jeton reste en mémoire le temps de l'envoi.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Zone de notification</h2>
+    <div class="tray">
+      <div class="menu" aria-label="Aperçu du menu">
+        <div class="dis">● Passerelle active sur 127.0.0.1:1025</div>
+        <div class="dis">Zimbra joignable (84ms)</div>
+        <div class="sep"></div>
+        <div class="hl">Tester la connexion Zimbra</div>
+        <div>Arrêter la passerelle</div>
+        <div class="sep"></div>
+        <div class="sub">Paramètres</div>
+        <div>Configurer Thunderbird…</div>
+        <div>Ouvrir le journal</div>
+        <div class="sep"></div>
+        <div>Quitter</div>
+      </div>
+      <div class="states">
+        <div class="state"><img src="tray-green.png" alt=""><div><b>Vert</b> <span>passerelle active, Zimbra joignable</span></div></div>
+        <div class="state"><img src="tray-orange.png" alt=""><div><b>Orange</b> <span>passerelle active, Zimbra injoignable</span></div></div>
+        <div class="state"><img src="tray-grey.png" alt=""><div><b>Gris</b> <span>passerelle arrêtée</span></div></div>
+        <p style="font-size:14px;color:var(--muted)">Zimbra est testé au démarrage puis toutes les 5 minutes. Une notification signale la perte et le retour de la connexion. Le sous-menu <b>Paramètres</b> contient l'URL Zimbra, le port d'écoute et le lancement à l'ouverture de session.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Réglages Thunderbird</h2>
+    <p>Paramètres des comptes → Serveur sortant (SMTP) → Ajouter.</p>
+    <div class="tablewrap">
+      <table>
+        <tr><td>Nom d'hôte</td><td><code>127.0.0.1</code></td></tr>
+        <tr><td>Port</td><td><code>1025</code></td></tr>
+        <tr><td>Sécurité de la connexion</td><td>Aucune</td></tr>
+        <tr><td>Authentification</td><td>Mot de passe normal</td></tr>
+        <tr><td>Nom d'utilisateur</td><td>Votre adresse Zimbra complète</td></tr>
+        <tr><td>Copies et dossiers</td><td>Décocher « Placer une copie dans Envoyés » : Zimbra l'enregistre déjà.</td></tr>
+      </table>
+    </div>
+    <p>Un autre serveur Zimbra ? Changez son adresse dans <b>Paramètres → URL du serveur Zimbra</b>.</p>
+  </section>
+
+  <section>
+    <h2>Compiler depuis les sources</h2>
+    <p>Prérequis : Go (version indiquée dans <code>go.mod</code>) et <a href="https://jrsoftware.org/isdl.php">Inno Setup 6</a>. Le script lance les tests, génère les icônes, compile l'exe puis l'installeur dans <code>dist/</code>.</p>
+<pre>git clone https://github.com/Rem7474/zimbra-smtp-proxy.git
+cd zimbra-smtp-proxy
+.\build.ps1 -Version 1.0.0          # Windows (PowerShell)
+./build.sh 1.0.0                    # Linux, macOS, Git Bash (Inno Setup via Docker)</pre>
+  </section>
+
+  <footer>
+    <a href="https://github.com/Rem7474/zimbra-smtp-proxy">Code source sur GitHub</a>
+    <a href="https://github.com/Rem7474/zimbra-smtp-proxy/issues">Signaler un problème</a>
+  </footer>
+</main>
+<script>
+fetch("https://api.github.com/repos/Rem7474/zimbra-smtp-proxy/releases/latest")
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (rel) { if (rel && rel.tag_name) document.getElementById("version").textContent = "Version " + rel.tag_name.replace(/^v/, ""); })
+  .catch(function () {});
+</script>
+</body>
+</html>

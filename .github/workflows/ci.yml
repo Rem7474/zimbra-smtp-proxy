@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: Lint et tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Fichiers non formatés :"; echo "$unformatted"; exit 1; fi
+      - name: go vet (linux, windows)
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+      - name: staticcheck (linux, windows)
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          staticcheck ./...
+          GOOS=windows staticcheck ./...
+      - name: Tests
+        run: go test -race -count=1 ./...
+      - name: Icônes générées à jour
+        run: |
+          go run ./tools/genicon
+          git diff --exit-code -- winres installer site
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+
+  windows:
+    name: Build et test Windows
+    needs: lint-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Inno Setup
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+      - name: Build
+        run: ./build.ps1 -Version "0.0.${{ github.run_number }}"
+      - name: Test de fumée (install, SMTP, désinstallation)
+        run: ./scripts/smoke-test.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zimbra-smtp-proxy-${{ github.sha }}
+          path: |
+            dist/zimbra-smtp-proxy.exe
+            dist/ZimbraSmtpProxy-Setup.exe
+          retention-days: 14

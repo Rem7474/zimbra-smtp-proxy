@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Inno Setup
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+      - name: Build
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          ./build.ps1 -Version $version
+      - name: Test de fumée
+        run: ./scripts/smoke-test.ps1
+      - name: Sommes de contrôle
+        working-directory: dist
+        run: |
+          Get-FileHash zimbra-smtp-proxy.exe, ZimbraSmtpProxy-Setup.exe -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/zimbra-smtp-proxy.exe
+            dist/ZimbraSmtpProxy-Setup.exe
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create $env:GITHUB_REF_NAME
+          dist/ZimbraSmtpProxy-Setup.exe dist/zimbra-smtp-proxy.exe dist/SHA256SUMS.txt
+          --title "Zimbra SMTP Proxy $env:GITHUB_REF_NAME" --generate-notes --verify-tag
