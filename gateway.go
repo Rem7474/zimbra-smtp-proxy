@@ -33,6 +33,7 @@ type Gateway struct {
 
 	mu   sync.Mutex
 	srv  *smtp.Server
+	ln   net.Listener
 	addr string
 }
 
@@ -65,11 +66,11 @@ func (g *Gateway) Start(port int) error {
 	srv.ReadTimeout = 2 * time.Minute
 	srv.WriteTimeout = 2 * time.Minute
 	go func() {
-		if err := srv.Serve(l); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
+		if err := srv.Serve(l); err != nil && !errors.Is(err, smtp.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("serveur SMTP: %v", err)
 		}
 	}()
-	g.srv, g.addr = srv, addr
+	g.srv, g.ln, g.addr = srv, l, addr
 	log.Printf("passerelle active sur %s -> %s", addr, g.ZimbraURL())
 	return nil
 }
@@ -81,12 +82,15 @@ func (g *Gateway) Stop() {
 	if g.srv == nil {
 		return
 	}
+	// Fermé ici : Serve n'a peut-être pas encore enregistré le listener
+	// auprès du serveur si Stop suit immédiatement Start.
+	g.ln.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := g.srv.Shutdown(ctx); err != nil {
 		g.srv.Close()
 	}
-	g.srv = nil
+	g.srv, g.ln = nil, nil
 	log.Printf("passerelle arrêtée")
 }
 
