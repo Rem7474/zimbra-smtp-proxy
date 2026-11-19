@@ -165,17 +165,18 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
   <section>
     <h2>Fonctionnement</h2>
-    <div class="flow" role="img" aria-label="Thunderbird envoie en SMTP à la passerelle locale, qui transmet à Zimbra en HTTPS">
-      <div class="node"><b>Thunderbird</b><span>serveur sortant 127.0.0.1:1025</span></div>
-      <div class="arrow">SMTP local →</div>
+    <div class="flow" role="img" aria-label="Thunderbird communique en SMTP et LDAP avec la passerelle locale, qui transmet à Zimbra en HTTPS">
+      <div class="node"><b>Thunderbird</b><span>SMTP 127.0.0.1:1025 · LDAP :3890</span></div>
+      <div class="arrow">SMTP / LDAP →</div>
       <div class="node me"><b>Zimbra SMTP Proxy</b><span>zone de notification</span></div>
       <div class="arrow">HTTPS · SOAP →</div>
-      <div class="node"><b>Zimbra</b><span>AuthRequest, upload, SendMsgRequest</span></div>
+      <div class="node"><b>Zimbra</b><span>Auth, upload, SendMsg, AutoComplete</span></div>
     </div>
     <ul class="points">
       <li>Le message est transmis tel que Thunderbird l'a écrit : pièces jointes, HTML, Cc, Cci et fils de discussion sont conservés.</li>
+      <li>L'annuaire LDAP local permet l'autocomplétion des contacts personnels et de la liste globale (GAL) lors de la saisie d'un destinataire.</li>
       <li>La passerelle écoute uniquement sur <code>127.0.0.1</code> : aucune autre machine du réseau ne peut s'en servir.</li>
-      <li>Le mot de passe n'est jamais enregistré. Il sert à ouvrir une session Zimbra dont le jeton reste en mémoire le temps de l'envoi.</li>
+      <li>Le mot de passe n'est jamais enregistré. Il sert à ouvrir une session Zimbra dont le jeton reste en mémoire.</li>
     </ul>
   </section>
 
@@ -183,7 +184,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <h2>Zone de notification</h2>
     <div class="tray">
       <div class="menu" aria-label="Aperçu du menu">
-        <div class="dis">● Passerelle active sur 127.0.0.1:1025</div>
+        <div class="dis">● Passerelle active (SMTP :1025 · LDAP :3890)</div>
         <div class="dis">Zimbra joignable (84 ms)</div>
         <div class="sep"></div>
         <div class="hl">Ouvrir la configuration…</div>
@@ -216,7 +217,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
   <section>
     <h2>Réglages Thunderbird</h2>
-    <p>Paramètres des comptes → Serveur sortant (SMTP) → Ajouter.</p>
+    <p><b>Envoi (SMTP)</b> — Paramètres des comptes → Serveur sortant (SMTP) → Ajouter.</p>
     <div class="tablewrap">
       <table>
         <tr><td>Nom d'hôte</td><td><code>127.0.0.1</code></td></tr>
@@ -227,7 +228,17 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
         <tr><td>Copies et dossiers</td><td>Décocher « Placer une copie dans Envoyés » : Zimbra l'enregistre déjà.</td></tr>
       </table>
     </div>
-    <p>Un autre serveur Zimbra ? Changez son adresse dans <b>Paramètres → URL du serveur Zimbra</b>.</p>
+    <p><b>Autocomplétion (LDAP)</b> — Paramètres → Rédaction → Adressage → cocher « Serveur d'annuaire » → Modifier les annuaires → Ajouter.</p>
+    <div class="tablewrap">
+      <table>
+        <tr><td>Nom d'hôte</td><td><code>127.0.0.1</code></td></tr>
+        <tr><td>Port</td><td><code>3890</code></td></tr>
+        <tr><td>Base DN</td><td><code>dc=zimbra,dc=local</code></td></tr>
+        <tr><td>Bind DN</td><td>Votre adresse Zimbra complète</td></tr>
+        <tr><td>Connexion sécurisée (SSL)</td><td>Décoché</td></tr>
+      </table>
+    </div>
+    <p>Un autre serveur Zimbra ? Changez son adresse dans <b>Paramètres → Serveur Zimbra</b>.</p>
   </section>
 
   <section>

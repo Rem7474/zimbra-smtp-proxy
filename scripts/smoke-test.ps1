@@ -1,6 +1,6 @@
-# Test de fumée sur Windows : installation silencieuse, démarrage, dialogue
-# SMTP sur 127.0.0.1:1025, ouverture de la fenêtre WebView2, puis
-# désinstallation. Utilisé par la CI.
+﻿# Test de fumée sur Windows : installation silencieuse, démarrage, dialogue
+# SMTP sur 127.0.0.1:1025 et LDAP sur 127.0.0.1:3890, ouverture de la
+# fenêtre WebView2, puis désinstallation. Utilisé par la CI.
 $ErrorActionPreference = "Stop"
 $setup = Join-Path $PSScriptRoot "..\dist\ZimbraSmtpProxy-Setup.exe"
 $appDir = Join-Path $env:LOCALAPPDATA "Programs\ZimbraSmtpProxy"
@@ -45,6 +45,36 @@ try {
   if ($resp.StartsWith("250")) { throw "MAIL accepté sans authentification" }
   $writer.WriteLine("QUIT")
   $client.Close()
+
+  Write-Host "Annuaire LDAP (127.0.0.1:3890)"
+  $ldapClient = $null
+  for ($i = 0; $i -lt 10 -and -not $ldapClient; $i++) {
+    try { $ldapClient = New-Object Net.Sockets.TcpClient("127.0.0.1", 3890) } catch { Start-Sleep -Seconds 1 }
+  }
+  if (-not $ldapClient) { throw "le port LDAP 3890 ne s'est pas ouvert" }
+  $ldapClient.ReceiveTimeout = 5000
+  $lStream = $ldapClient.GetStream()
+  $bindReq = [byte[]](0x30, 0x0c, 0x02, 0x01, 0x01, 0x60, 0x07, 0x02, 0x01, 0x03, 0x04, 0x00, 0x80, 0x00)
+  $lStream.Write($bindReq, 0, $bindReq.Length)
+  $lStream.Flush()
+  $buf = New-Object byte[] 256
+  $n = $lStream.Read($buf, 0, $buf.Length)
+  if ($n -lt 10 -or $buf[0] -ne 0x30) { throw "réponse LDAP invalide ($n octets)" }
+  $hasBindResp = $false
+  $hasInvalidCreds = $false
+  for ($i = 0; $i -lt $n; $i++) {
+    if ($buf[$i] -eq 0x61) { $hasBindResp = $true }
+    if ($i + 2 -lt $n -and $buf[$i] -eq 0x0a -and $buf[$i+1] -eq 0x01 -and $buf[$i+2] -eq 0x31) {
+      $hasInvalidCreds = $true
+    }
+  }
+  if (-not $hasBindResp -or -not $hasInvalidCreds) {
+    throw "BindResponse InvalidCredentials (49) attendu sur le port LDAP 3890"
+  }
+  $unbindReq = [byte[]](0x30, 0x05, 0x02, 0x01, 0x02, 0x42, 0x00)
+  $lStream.Write($unbindReq, 0, $unbindReq.Length)
+  $ldapClient.Close()
+  Write-Host "  BindResponse 49 (InvalidCredentials) reçu sur 127.0.0.1:3890"
 
   Write-Host "Fenêtre de configuration (WebView2)"
   $webview = $null

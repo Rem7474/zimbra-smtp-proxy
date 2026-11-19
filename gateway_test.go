@@ -14,11 +14,21 @@ import (
 	"testing"
 )
 
-// fakeZimbra simule AuthRequest, NoOpRequest, SendMsgRequest et l'upload.
+// fakeZimbra simule AuthRequest, NoOpRequest, SendMsgRequest, AutoCompleteRequest et l'upload.
 type fakeZimbra struct {
-	mu       sync.Mutex
-	uploaded []byte
-	sentAid  string
+	mu                   sync.Mutex
+	uploaded             []byte
+	sentAid              string
+	authCalls            int
+	autoCompleteCalls    int
+	lastAutoQuery        string
+	tokenToIssue         string
+	authLifetimeMs       int64
+	expiredTokens        map[string]bool
+	matches              []map[string]any
+	autoCompleteWait     chan struct{}
+	autoCompleteStarted  chan struct{}
+	autoCompleteCanceled chan struct{}
 }
 
 func (f *fakeZimbra) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,20 +56,46 @@ func (f *fakeZimbra) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Body map[string]json.RawMessage
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		fault := func(msg string) {
+		fault := func(code, msg string) {
 			w.WriteHeader(500)
-			json.NewEncoder(w).Encode(map[string]any{"Body": map[string]any{"Fault": map[string]any{"Reason": map[string]any{"Text": msg}}}})
+			fObj := map[string]any{"Reason": map[string]any{"Text": msg}}
+			if code != "" {
+				fObj["Detail"] = map[string]any{"Error": map[string]any{"Code": code}}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"Body": map[string]any{"Fault": fObj}})
 		}
 		switch {
 		case req.Body["AuthRequest"] != nil:
-			if !strings.Contains(string(req.Body["AuthRequest"]), `"secret"`) {
-				fault("authentication failed for [alice@ex.fr]")
+			var ar struct {
+				Account struct {
+					Content string `json:"_content"`
+				} `json:"account"`
+				Password struct {
+					Content string `json:"_content"`
+				} `json:"password"`
+			}
+			json.Unmarshal(req.Body["AuthRequest"], &ar)
+			if ar.Password.Content != "secret" {
+				fault("account.AUTH_FAILED", "authentication failed for ["+ar.Account.Content+"]")
 				return
 			}
-			io.WriteString(w, `{"Body":{"AuthResponse":{"authToken":[{"_content":"tok-alice"}]}}}`)
+			f.mu.Lock()
+			f.authCalls++
+			tok := f.tokenToIssue
+			if tok == "" {
+				tok = "tok-alice"
+			}
+			life := f.authLifetimeMs
+			f.mu.Unlock()
+			resp := map[string]any{"authToken": []map[string]any{{"_content": tok}}}
+			if life > 0 {
+				resp["lifetime"] = life
+			}
+			json.NewEncoder(w).Encode(map[string]any{"Body": map[string]any{"AuthResponse": resp}})
+
 		case req.Body["SendMsgRequest"] != nil:
 			if req.Header.Context.AuthToken == nil || req.Header.Context.AuthToken.Content != "tok-alice" {
-				fault("no valid authtoken present")
+				fault("service.AUTH_REQUIRED", "no valid authtoken present")
 				return
 			}
 			var m struct {
@@ -70,8 +106,84 @@ func (f *fakeZimbra) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.sentAid = m.M.Aid
 			f.mu.Unlock()
 			io.WriteString(w, `{"Body":{"SendMsgResponse":{"m":[{"id":"1"}]}}}`)
+
+		case req.Body["AutoCompleteRequest"] != nil:
+			var tok string
+			if req.Header.Context.AuthToken != nil {
+				tok = req.Header.Context.AuthToken.Content
+			}
+			f.mu.Lock()
+			expired := f.expiredTokens[tok]
+			expected := f.tokenToIssue
+			if expected == "" {
+				expected = "tok-alice"
+			}
+			waitCh := f.autoCompleteWait
+			startedCh := f.autoCompleteStarted
+			canceledCh := f.autoCompleteCanceled
+			matches := f.matches
+			f.mu.Unlock()
+
+			if tok == "" {
+				fault("service.AUTH_REQUIRED", "no valid authtoken present")
+				return
+			}
+			if expired {
+				fault("service.AUTH_EXPIRED", "auth credentials have expired")
+				return
+			}
+			if tok != expected && tok != "tok-alice" {
+				fault("service.AUTH_REQUIRED", "no valid authtoken present")
+				return
+			}
+			if waitCh != nil {
+				if startedCh != nil {
+					select {
+					case startedCh <- struct{}{}:
+					default:
+					}
+				}
+				select {
+				case <-waitCh:
+				case <-r.Context().Done():
+					if canceledCh != nil {
+						select {
+						case canceledCh <- struct{}{}:
+						default:
+						}
+					}
+					return
+				}
+			}
+
+			var ac struct {
+				Name       string `json:"name"`
+				IncludeGal int    `json:"includeGal"`
+			}
+			json.Unmarshal(req.Body["AutoCompleteRequest"], &ac)
+			f.mu.Lock()
+			f.autoCompleteCalls++
+			f.lastAutoQuery = ac.Name
+			f.mu.Unlock()
+
+			if matches == nil {
+				matches = []map[string]any{
+					{"email": `"Jean Dupont" <jean.dupont@ex.fr>`, "display": "Jean Dupont", "first": "Jean", "last": "Dupont"},
+					{"email": "alice.durand@ex.fr", "display": "Alice Durand"},
+					{"email": `"Jean Dupont" <jean.dupont@ex.fr>`, "display": "Doublon"},
+					{"email": "groupe-multi: a@ex.fr, b@ex.fr", "display": "Groupe"},
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"Body": map[string]any{
+					"AutoCompleteResponse": map[string]any{
+						"match": matches,
+					},
+				},
+			})
+
 		default:
-			fault("no valid authtoken present")
+			fault("", "no valid authtoken present")
 		}
 	}
 }

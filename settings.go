@@ -10,15 +10,20 @@ import (
 
 // uiState est l'état affiché par la fenêtre de configuration.
 type uiState struct {
-	Running      bool   `json:"running"`
-	Addr         string `json:"addr"`
-	PortError    string `json:"portError"`
-	ZimbraURL    string `json:"zimbraURL"`
-	Port         int    `json:"port"`
-	Zimbra       string `json:"zimbra"` // unknown | ok | ko
-	ZimbraDetail string `json:"zimbraDetail"`
-	Autostart    bool   `json:"autostart"`
-	Version      string `json:"version"`
+	Running       bool   `json:"running"`
+	Addr          string `json:"addr"`
+	PortError     string `json:"portError"`
+	LDAPEnabled   bool   `json:"ldapEnabled"`
+	LDAPRunning   bool   `json:"ldapRunning"`
+	LDAPAddr      string `json:"ldapAddr"`
+	LDAPPort      int    `json:"ldapPort"`
+	LDAPPortError string `json:"ldapPortError"`
+	ZimbraURL     string `json:"zimbraURL"`
+	Port          int    `json:"port"`
+	Zimbra        string `json:"zimbra"` // unknown | ok | ko
+	ZimbraDetail  string `json:"zimbraDetail"`
+	Autostart     bool   `json:"autostart"`
+	Version       string `json:"version"`
 }
 
 type testResult struct {
@@ -28,16 +33,18 @@ type testResult struct {
 }
 
 type saveRequest struct {
-	ZimbraURL string `json:"zimbraURL"`
-	Port      int    `json:"port"`
-	Autostart bool   `json:"autostart"`
-	Force     bool   `json:"force"` // enregistrer malgré les avertissements
+	ZimbraURL   string `json:"zimbraURL"`
+	Port        int    `json:"port"`
+	LDAPEnabled bool   `json:"ldapEnabled"`
+	LDAPPort    int    `json:"ldapPort"`
+	Autostart   bool   `json:"autostart"`
+	Force       bool   `json:"force"` // enregistrer malgré les avertissements
 }
 
 type saveResult struct {
 	OK      bool     `json:"ok"`
 	Error   string   `json:"error,omitempty"`
-	Field   string   `json:"field,omitempty"` // champ en erreur : url | port
+	Field   string   `json:"field,omitempty"` // champ en erreur : url | port | ldapPort
 	Warning string   `json:"warning,omitempty"`
 	State   *uiState `json:"state,omitempty"`
 }
@@ -81,16 +88,25 @@ func (a *app) snapshot() uiState {
 
 func (a *app) snapshotLocked() uiState {
 	addr := a.gw.Status()
+	var ldapAddr string
+	if a.ldap != nil {
+		ldapAddr = a.ldap.Status()
+	}
 	return uiState{
-		Running:      addr != "",
-		Addr:         addr,
-		PortError:    a.portErr,
-		ZimbraURL:    a.cfg.ZimbraURL,
-		Port:         a.cfg.ListenPort,
-		Zimbra:       [...]string{"unknown", "ok", "ko"}[a.zState],
-		ZimbraDetail: a.zDetail,
-		Autostart:    autostartEnabled(),
-		Version:      version,
+		Running:       addr != "",
+		Addr:          addr,
+		PortError:     a.portErr,
+		LDAPEnabled:   a.cfg.LDAPEnabled,
+		LDAPRunning:   ldapAddr != "",
+		LDAPAddr:      ldapAddr,
+		LDAPPort:      a.cfg.LDAPPort,
+		LDAPPortError: a.ldapPortErr,
+		ZimbraURL:     a.cfg.ZimbraURL,
+		Port:          a.cfg.ListenPort,
+		Zimbra:        [...]string{"unknown", "ok", "ko"}[a.zState],
+		ZimbraDetail:  a.zDetail,
+		Autostart:     autostartEnabled(),
+		Version:       version,
 	}
 }
 
@@ -121,6 +137,20 @@ func (a *app) save(req saveRequest) saveResult {
 	old := a.cfg
 	a.mu.Unlock()
 
+	ldapPort := req.LDAPPort
+	if !req.LDAPEnabled && ldapPort == 0 {
+		ldapPort = old.LDAPPort
+		if validPort(ldapPort) != nil {
+			ldapPort = defaultConfig.LDAPPort
+		}
+	}
+	if err := validPort(ldapPort); err != nil {
+		return saveResult{Error: err.Error(), Field: "ldapPort"}
+	}
+	if req.LDAPEnabled && ldapPort == req.Port {
+		return saveResult{Error: "Le port LDAP doit être différent du port SMTP.", Field: "ldapPort"}
+	}
+
 	if u != old.ZimbraURL && !req.Force {
 		var warns []string
 		if strings.HasPrefix(u, "http://") {
@@ -134,18 +164,51 @@ func (a *app) save(req saveRequest) saveResult {
 		}
 	}
 
-	// Port : redémarre la passerelle si elle tournait (ou était en échec).
+	smtpActive := a.gw.Status() != "" || a.portErrSet()
+	ldapActive := (a.ldap != nil && a.ldap.Status() != "") || a.ldapPortErrSet()
+	gatewayActive := smtpActive || ldapActive
+
+	// Échange de ports : si le nouveau port SMTP est occupé par notre propre
+	// serveur LDAP, arrêter LDAP avant de démarrer SMTP.
+	swappedFromLDAP := false
+	if a.ldap != nil && a.ldap.Status() != "" && req.Port != old.ListenPort && req.Port == old.LDAPPort {
+		a.stopLDAP()
+		swappedFromLDAP = true
+	}
+
+	// Port SMTP : redémarre la passerelle si elle tournait (ou était en échec).
 	if req.Port != old.ListenPort || a.portErrSet() {
-		wasActive := a.gw.Status() != "" || a.portErrSet()
-		if wasActive {
+		if smtpActive {
 			a.gw.Stop()
 			if err := a.startGateway(req.Port); err != nil {
 				msg := a.portError()
 				if req.Port != old.ListenPort {
 					a.startGateway(old.ListenPort)
 				}
+				if swappedFromLDAP && old.LDAPEnabled {
+					a.startLDAP(old.LDAPPort)
+				}
 				a.refresh()
 				return saveResult{Error: msg, Field: "port"}
+			}
+		}
+	}
+
+	// Serveur LDAP : démarre, redémarre ou arrête selon l'état de la passerelle.
+	if a.ldap != nil {
+		switch {
+		case !req.LDAPEnabled:
+			a.stopLDAP()
+		case gatewayActive && (swappedFromLDAP || !old.LDAPEnabled || ldapPort != old.LDAPPort || a.ldapPortErrSet() || a.ldap.Status() == ""):
+			wasLDAPRunning := a.ldap.Status() != "" || swappedFromLDAP
+			a.ldap.Stop()
+			if err := a.startLDAP(ldapPort); err != nil {
+				msg := a.ldapPortError()
+				if wasLDAPRunning && old.LDAPEnabled && old.LDAPPort != req.Port {
+					a.startLDAP(old.LDAPPort)
+				}
+				a.refresh()
+				return saveResult{Error: msg, Field: "ldapPort"}
 			}
 		}
 	}
@@ -157,14 +220,20 @@ func (a *app) save(req saveRequest) saveResult {
 	}
 
 	a.mu.Lock()
-	a.cfg.ZimbraURL, a.cfg.ListenPort = u, req.Port
+	a.cfg.ZimbraURL = u
+	a.cfg.ListenPort = req.Port
+	a.cfg.LDAPEnabled = req.LDAPEnabled
+	a.cfg.LDAPPort = ldapPort
 	cfg := a.cfg
 	a.mu.Unlock()
 	a.gw.SetZimbraURL(u)
+	if a.ldap != nil {
+		a.ldap.SetZimbraURL(u)
+	}
 	if err := cfg.save(); err != nil {
 		return saveResult{Error: "Enregistrement impossible : " + err.Error()}
 	}
-	log.Printf("configuration enregistrée: %s, port %d", u, req.Port)
+	log.Printf("configuration enregistrée: %s, SMTP %d, LDAP %v (%d)", u, req.Port, req.LDAPEnabled, ldapPort)
 
 	if u != old.ZimbraURL {
 		a.checkZimbra()
@@ -198,14 +267,57 @@ func (a *app) portError() string {
 
 func (a *app) portErrSet() bool { return a.portError() != "" }
 
+func (a *app) startLDAP(port int) error {
+	if a.ldap == nil {
+		return nil
+	}
+	err := a.ldap.Start(port)
+	a.mu.Lock()
+	if err != nil {
+		a.ldapPortErr = fmt.Sprintf("Impossible d'écouter sur le port LDAP %d : %v", port, err)
+		log.Printf("écoute LDAP port %d: %v", port, err)
+	} else {
+		a.ldapPortErr = ""
+	}
+	a.mu.Unlock()
+	return err
+}
+
+func (a *app) stopLDAP() {
+	if a.ldap != nil {
+		a.ldap.Stop()
+	}
+	a.mu.Lock()
+	a.ldapPortErr = ""
+	a.mu.Unlock()
+}
+
+func (a *app) ldapPortError() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.ldapPortErr
+}
+
+func (a *app) ldapPortErrSet() bool { return a.ldapPortError() != "" }
+
 func (a *app) toggleGatewayLocked() {
-	if a.gw.Status() != "" {
+	ldapRunning := a.ldap != nil && a.ldap.Status() != ""
+	if a.gw.Status() != "" || ldapRunning {
 		a.gw.Stop()
+		a.stopLDAP()
+		a.mu.Lock()
+		a.portErr = ""
+		a.mu.Unlock()
 	} else {
 		a.mu.Lock()
 		port := a.cfg.ListenPort
+		ldapEnabled := a.cfg.LDAPEnabled
+		ldapPort := a.cfg.LDAPPort
 		a.mu.Unlock()
 		a.startGateway(port)
+		if ldapEnabled {
+			a.startLDAP(ldapPort)
+		}
 	}
 	a.refresh()
 }

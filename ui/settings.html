@@ -161,6 +161,10 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
     <button id="gw-toggle" type="button">Démarrer</button>
   </div>
   <div class="status-row">
+    <div class="dot" id="ldap-dot"></div>
+    <div><b id="ldap-title">Annuaire LDAP</b><span id="ldap-detail"></span></div>
+  </div>
+  <div class="status-row">
     <div class="dot busy" id="z-dot"></div>
     <div><b id="z-title">Zimbra</b><span id="z-detail"></span></div>
     <button id="z-test" type="button">Tester</button>
@@ -171,18 +175,29 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
   <h2 id="h-settings">PARAMÈTRES</h2>
   <div class="field">
     <label for="url">Serveur Zimbra</label>
-    <input type="text" id="url" spellcheck="false" autocomplete="off" placeholder="https://mail.exemple.fr">
-    <div class="error" id="url-error" hidden></div>
+    <input type="text" id="url" name="zimbraURL" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none" placeholder="https://mail.exemple.fr" aria-describedby="url-error">
+    <div class="error" id="url-error" role="alert" hidden></div>
   </div>
   <div class="field">
-    <label for="port">Port d'écoute local</label>
-    <input type="number" id="port" min="1024" max="65535">
-    <div class="hint">Thunderbird doit utiliser ce port comme serveur sortant.</div>
-    <div class="error" id="port-error" hidden></div>
+    <label for="port">Port SMTP local</label>
+    <input type="number" id="port" name="port" min="1024" max="65535" aria-describedby="port-hint port-error">
+    <div class="hint" id="port-hint">Thunderbird doit utiliser ce port comme serveur sortant.</div>
+    <div class="error" id="port-error" role="alert" hidden></div>
+  </div>
+  <label class="toggle" for="ldap-enabled">
+    <span>Autocomplétion des contacts (annuaire LDAP)</span>
+    <input type="checkbox" id="ldap-enabled" name="ldapEnabled">
+    <span class="switch" aria-hidden="true"></span>
+  </label>
+  <div class="field" id="ldap-port-field">
+    <label for="ldapPort">Port LDAP local</label>
+    <input type="number" id="ldapPort" name="ldapPort" min="1024" max="65535" aria-describedby="ldapPort-hint ldapPort-error">
+    <div class="hint" id="ldapPort-hint">Thunderbird utilise ce port comme serveur d'annuaire LDAP.</div>
+    <div class="error" id="ldapPort-error" role="alert" hidden></div>
   </div>
   <label class="toggle" for="autostart">
     <span>Lancer à l'ouverture de session Windows</span>
-    <input type="checkbox" id="autostart">
+    <input type="checkbox" id="autostart" name="autostart">
     <span class="switch" aria-hidden="true"></span>
   </label>
   <div class="alert warn" id="confirm" hidden>
@@ -200,7 +215,7 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
 </form>
 
 <details class="card" id="tb">
-  <summary>Configurer Thunderbird</summary>
+  <summary>Configurer Thunderbird — Envoi (SMTP)</summary>
   <dl>
     <dt>Nom d'hôte</dt><dd><code>127.0.0.1</code><button type="button" class="link" data-copy="127.0.0.1">Copier</button></dd>
     <dt>Port</dt><dd><code id="tb-port">1025</code><button type="button" class="link" id="copy-port">Copier</button></dd>
@@ -209,6 +224,18 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
     <dt>Identifiant</dt><dd>Votre adresse Zimbra complète</dd>
   </dl>
   <p class="note">Paramètres des comptes → Serveur sortant (SMTP) → Ajouter. Puis, dans « Copies et dossiers » du compte, décochez « Placer une copie dans Envoyés » : Zimbra enregistre déjà le message.</p>
+</details>
+
+<details class="card" id="tb-ldap">
+  <summary>Configurer Thunderbird — Autocomplétion (LDAP)</summary>
+  <dl>
+    <dt>Nom d'hôte</dt><dd><code>127.0.0.1</code><button type="button" class="link" data-copy="127.0.0.1">Copier</button></dd>
+    <dt>Port</dt><dd><code id="tb-ldap-port">3890</code><button type="button" class="link" id="copy-ldap-port">Copier</button></dd>
+    <dt>Base DN</dt><dd><code>dc=zimbra,dc=local</code><button type="button" class="link" data-copy="dc=zimbra,dc=local">Copier</button></dd>
+    <dt>Bind DN</dt><dd>Votre adresse Zimbra complète</dd>
+    <dt>Connexion sécurisée (SSL)</dt><dd>Non (décoché)</dd>
+  </dl>
+  <p class="note">Paramètres → Rédaction → Adressage → cochez « Serveur d'annuaire » → Modifier les annuaires → Ajouter. Au premier destinataire saisi, Thunderbird demandera votre mot de passe Zimbra et le mémorisera.</p>
 </details>
 
 <footer>
@@ -256,7 +283,26 @@ function render(s) {
     $("gw-title").textContent = "Passerelle arrêtée";
     $("gw-detail").textContent = "Thunderbird ne peut pas envoyer de mail";
   }
-  $("gw-toggle").textContent = s.running ? "Arrêter" : "Démarrer";
+  $("gw-toggle").textContent = (s.running || s.ldapRunning) ? "Arrêter" : "Démarrer";
+
+  const ldapDot = $("ldap-dot");
+  if (s.ldapPortError) {
+    ldapDot.className = "dot err";
+    $("ldap-title").textContent = "Annuaire LDAP en erreur";
+    $("ldap-detail").textContent = s.ldapPortError;
+  } else if (s.ldapRunning) {
+    ldapDot.className = "dot ok";
+    $("ldap-title").textContent = "Annuaire LDAP actif";
+    $("ldap-detail").textContent = "Écoute sur " + s.ldapAddr;
+  } else if (s.ldapEnabled) {
+    ldapDot.className = "dot";
+    $("ldap-title").textContent = "Annuaire LDAP arrêté";
+    $("ldap-detail").textContent = "Autocomplétion indisponible";
+  } else {
+    ldapDot.className = "dot";
+    $("ldap-title").textContent = "Annuaire LDAP désactivé";
+    $("ldap-detail").textContent = "Autocomplétion non activée";
+  }
 
   const zDot = $("z-dot");
   zDot.className = "dot " + ({ ok: "ok", ko: "warn", unknown: "busy" })[s.zimbra];
@@ -264,8 +310,9 @@ function render(s) {
   $("z-detail").textContent = s.zimbraURL.replace(/^https:\/\//, "") + (s.zimbraDetail ? " · " + s.zimbraDetail : "");
 
   $("tb-port").textContent = s.port;
+  $("tb-ldap-port").textContent = s.ldapPort;
 
-  const next = { zimbraURL: s.zimbraURL, port: s.port, autostart: s.autostart };
+  const next = { zimbraURL: s.zimbraURL, port: s.port, ldapEnabled: s.ldapEnabled, ldapPort: s.ldapPort, autostart: s.autostart };
   if (!saved || !isDirty()) fillForm(next);
   saved = next;
   updateDirty();
@@ -274,27 +321,42 @@ function render(s) {
 function fillForm(v) {
   $("url").value = v.zimbraURL;
   $("port").value = v.port;
+  $("ldap-enabled").checked = v.ldapEnabled;
+  $("ldapPort").value = v.ldapPort;
+  $("ldap-port-field").hidden = !v.ldapEnabled;
   $("autostart").checked = v.autostart;
 }
 
 function formValues() {
-  return { zimbraURL: $("url").value.trim(), port: parseInt($("port").value, 10) || 0, autostart: $("autostart").checked };
+  return {
+    zimbraURL: $("url").value.trim(),
+    port: parseInt($("port").value, 10) || 0,
+    ldapEnabled: $("ldap-enabled").checked,
+    ldapPort: parseInt($("ldapPort").value, 10) || 0,
+    autostart: $("autostart").checked,
+  };
 }
 
 function isDirty() {
   if (!saved) return false;
   const v = formValues();
-  return v.zimbraURL !== saved.zimbraURL || v.port !== saved.port || v.autostart !== saved.autostart;
+  return (
+    v.zimbraURL !== saved.zimbraURL ||
+    v.port !== saved.port ||
+    v.ldapEnabled !== saved.ldapEnabled ||
+    (v.ldapEnabled && v.ldapPort !== saved.ldapPort) ||
+    v.autostart !== saved.autostart
+  );
 }
 
 function updateDirty() {
   const dirty = isDirty();
-  $("save").disabled = !dirty && !(state && state.portError);
+  $("save").disabled = !dirty && !(state && (state.portError || state.ldapPortError));
   $("reset").disabled = !dirty;
 }
 
 function setFieldError(field, msg) {
-  for (const f of ["url", "port"]) {
+  for (const f of ["url", "port", "ldapPort"]) {
     const on = f === field && msg;
     $(f + "-error").hidden = !on;
     $(f + "-error").textContent = on ? msg : "";
@@ -321,7 +383,13 @@ async function save(force) {
     $("confirm-yes").focus();
   } else if (!res.ok) {
     setMsg("");
-    if (res.field) setFieldError(res.field, res.error); else setMsg(res.error);
+    if (res.field) {
+      setFieldError(res.field, res.error);
+      if (res.field === "ldapPort") $("ldap-port-field").hidden = false;
+      $(res.field).focus();
+    } else {
+      setMsg(res.error);
+    }
   } else {
     saved = null;
     render(res.state);
@@ -332,7 +400,13 @@ async function save(force) {
 }
 
 $("form").addEventListener("submit", (e) => { e.preventDefault(); save(false); });
-$("form").addEventListener("input", () => { setMsg(""); $("confirm").hidden = true; updateDirty(); });
+$("form").addEventListener("input", () => {
+  $("ldap-port-field").hidden = !$("ldap-enabled").checked;
+  setFieldError(null);
+  setMsg("");
+  $("confirm").hidden = true;
+  updateDirty();
+});
 $("confirm-yes").addEventListener("click", () => save(true));
 $("confirm-no").addEventListener("click", () => { $("confirm").hidden = true; $("url").focus(); updateDirty(); });
 $("reset").addEventListener("click", () => { fillForm(saved); setFieldError(null); $("confirm").hidden = true; setMsg(""); updateDirty(); });
@@ -373,6 +447,7 @@ async function copy(text, btn) {
 }
 document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copy(b.dataset.copy, b)));
 $("copy-port").addEventListener("click", (e) => copy(String(state.port), e.currentTarget));
+$("copy-ldap-port").addEventListener("click", (e) => copy(String(state.ldapPort), e.currentTarget));
 
 $("open-log").addEventListener("click", () => call("openLog"));
 $("close").addEventListener("click", () => call("close"));
@@ -380,15 +455,33 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") call("clos
 
 // ---- Aperçu hors application (navigateur) ----
 function demo(method, arg) {
-  const base = { running: true, addr: "127.0.0.1:1025", port: 1025, zimbraURL: "https://mail-etu.esisar.grenoble-inp.fr",
+  const base = {
+    running: true, addr: "127.0.0.1:1025", port: 1025,
+    ldapEnabled: true, ldapRunning: true, ldapAddr: "127.0.0.1:3890", ldapPort: 3890, ldapPortError: "",
+    zimbraURL: "https://mail-etu.esisar.grenoble-inp.fr",
     zimbra: "ok", zimbraDetail: "84 ms", autostart: true, version: "aperçu",
-    portError: "" };
+    portError: ""
+  };
   demo.s = demo.s || base;
   const r = {
     state: () => demo.s,
     test: () => ({ ok: true, url: arg, detail: "91 ms" }),
-    save: () => (demo.s = Object.assign({}, demo.s, arg, { running: true, addr: "127.0.0.1:" + arg.port, portError: "" }), { ok: true, state: demo.s }),
-    toggle: () => (demo.s = Object.assign({}, demo.s, { running: !demo.s.running, addr: demo.s.running ? "" : "127.0.0.1:" + demo.s.port })),
+    save: () => (demo.s = Object.assign({}, demo.s, arg, {
+      running: true, addr: "127.0.0.1:" + arg.port, portError: "",
+      ldapRunning: !!arg.ldapEnabled,
+      ldapAddr: arg.ldapEnabled ? "127.0.0.1:" + arg.ldapPort : "",
+      ldapPortError: ""
+    }), { ok: true, state: demo.s }),
+    toggle: () => {
+      const up = !(demo.s.running || demo.s.ldapRunning);
+      demo.s = Object.assign({}, demo.s, {
+        running: up,
+        addr: up ? "127.0.0.1:" + demo.s.port : "",
+        ldapRunning: up && demo.s.ldapEnabled,
+        ldapAddr: up && demo.s.ldapEnabled ? "127.0.0.1:" + demo.s.ldapPort : "",
+      });
+      return demo.s;
+    },
   }[method];
   return Promise.resolve(r ? r() : null);
 }

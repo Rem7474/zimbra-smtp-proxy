@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,16 +43,18 @@ const (
 )
 
 type app struct {
-	gw *Gateway
+	gw   *Gateway
+	ldap *LDAPServer
 
 	opMu sync.Mutex // sérialise les actions (menu, fenêtre)
 
-	mu      sync.Mutex // protège les champs ci-dessous et l'icône
-	cfg     Config
-	zState  zimbraState
-	zDetail string
-	portErr string
-	uiPush  func(uiState) // fenêtre de configuration ouverte, sinon nil
+	mu          sync.Mutex // protège les champs ci-dessous et l'icône
+	cfg         Config
+	zState      zimbraState
+	zDetail     string
+	portErr     string
+	ldapPortErr string
+	uiPush      func(uiState) // fenêtre de configuration ouverte, sinon nil
 
 	mStatus, mZimbra, mOpen, mTest, mToggle, mQuit *systray.MenuItem
 }
@@ -63,9 +66,20 @@ func main() {
 		return
 	}
 	cfg := loadConfig()
-	a := &app{cfg: cfg, gw: NewGateway(cfg.ZimbraURL)}
+	a := &app{
+		cfg:  cfg,
+		gw:   NewGateway(cfg.ZimbraURL),
+		ldap: NewLDAPServer(cfg.ZimbraURL),
+	}
 	log.Printf("démarrage %s %s", appName, version)
-	systray.Run(a.onReady, a.gw.Stop)
+	systray.Run(a.onReady, a.stopAll)
+}
+
+func (a *app) stopAll() {
+	a.gw.Stop()
+	if a.ldap != nil {
+		a.ldap.Stop()
+	}
 }
 
 func setupLog() {
@@ -97,9 +111,20 @@ func (a *app) onReady() {
 	systray.SetOnTapped(a.openSettings) // clic gauche ; clic droit = menu
 
 	startErr := a.startGateway(a.cfg.ListenPort)
+	var ldapErr error
+	if a.cfg.LDAPEnabled {
+		ldapErr = a.startLDAP(a.cfg.LDAPPort)
+	}
 	a.refresh()
-	if startErr != nil {
-		go errorBox("%s\n\nLe port est peut-être utilisé par un autre programme.\nChangez-le dans la fenêtre de configuration.", a.portError())
+	if startErr != nil || ldapErr != nil {
+		var errs []string
+		if msg := a.portError(); msg != "" {
+			errs = append(errs, msg)
+		}
+		if msg := a.ldapPortError(); msg != "" {
+			errs = append(errs, msg)
+		}
+		go errorBox("%s\n\nLe port est peut-être utilisé par un autre programme.\nChangez-le dans la fenêtre de configuration.", strings.Join(errs, "\n"))
 	}
 	if slices.Contains(os.Args[1:], "--settings") {
 		a.openSettings()
@@ -153,10 +178,14 @@ func (a *app) refreshTrayLocked(s uiState) {
 		a.mStatus.SetTitle("⚠ Passerelle arrêtée : échec du démarrage")
 	case !s.Running:
 		a.mStatus.SetTitle("○ Passerelle arrêtée")
+	case s.LDAPRunning:
+		a.mStatus.SetTitle(fmt.Sprintf("● Passerelle active (SMTP :%d · LDAP :%d)", s.Port, s.LDAPPort))
+	case s.LDAPPortError != "":
+		a.mStatus.SetTitle("⚠ SMTP actif · échec LDAP")
 	default:
 		a.mStatus.SetTitle("● Passerelle active sur " + s.Addr)
 	}
-	if s.Running {
+	if s.Running || s.LDAPRunning {
 		a.mToggle.SetTitle("Arrêter la passerelle")
 	} else {
 		a.mToggle.SetTitle("Démarrer la passerelle")
@@ -174,16 +203,23 @@ func (a *app) refreshTrayLocked(s uiState) {
 	a.mZimbra.SetTitle(zimbra)
 
 	switch {
-	case !s.Running:
+	case !s.Running && !s.LDAPRunning:
 		systray.SetIcon(iconStopped)
-	case a.zState == zKO:
+	case a.zState == zKO || s.PortError != "" || s.LDAPPortError != "":
 		systray.SetIcon(iconWarn)
 	default:
 		systray.SetIcon(iconOK)
 	}
 	status := "arrêtée"
-	if s.Running {
+	switch {
+	case s.Running && s.LDAPRunning:
+		status = fmt.Sprintf("SMTP :%d · LDAP :%d", s.Port, s.LDAPPort)
+	case s.Running && s.LDAPPortError != "":
+		status = fmt.Sprintf("SMTP :%d (échec LDAP)", s.Port)
+	case s.Running:
 		status = s.Addr
+	case s.LDAPRunning:
+		status = s.LDAPAddr
 	}
 	systray.SetTooltip(fmt.Sprintf("%s — %s\n%s", appName, status, zimbra))
 }

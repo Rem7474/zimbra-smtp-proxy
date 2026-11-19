@@ -77,7 +77,7 @@ func (a *app) runSettingsWindow() {
 	}()
 
 	scale := dpiScale()
-	height := uint(700 * scale)
+	height := uint(760 * scale)
 	const smCyFullscreen = 17 // hauteur de la zone de travail, hors barre des tâches
 	if screen, _, _ := procGetSystemMetrics.Call(smCyFullscreen); screen > 0 && height > uint(screen) {
 		height = uint(screen)

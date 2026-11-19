@@ -106,9 +106,24 @@ func (g *Gateway) Status() string {
 
 // ---------- Client Zimbra ----------
 
-type soapFault struct{ msg string }
+type soapFault struct {
+	msg  string
+	code string
+}
 
 func (f *soapFault) Error() string { return "zimbra: " + f.msg }
+
+func isAuthExpired(err error) bool {
+	var f *soapFault
+	if !errors.As(err, &f) {
+		return false
+	}
+	if f.code == "service.AUTH_EXPIRED" || f.code == "service.AUTH_REQUIRED" {
+		return true
+	}
+	msg := strings.ToLower(f.msg)
+	return strings.Contains(msg, "authtoken") || strings.Contains(msg, "auth expired")
+}
 
 func soapCall(ctx context.Context, base, token string, body map[string]any) (map[string]any, error) {
 	hdr := map[string]any{"_jsns": "urn:zimbra"}
@@ -138,9 +153,17 @@ func soapCall(ctx context.Context, base, token string, body map[string]any) (map
 	if f, ok := out.Body["Fault"].(map[string]any); ok {
 		msg := "erreur inconnue"
 		if r, ok := f["Reason"].(map[string]any); ok {
-			msg, _ = r["Text"].(string)
+			if t, ok := r["Text"].(string); ok && t != "" {
+				msg = t
+			}
 		}
-		return nil, &soapFault{msg}
+		var code string
+		if d, ok := f["Detail"].(map[string]any); ok {
+			if e, ok := d["Error"].(map[string]any); ok {
+				code, _ = e["Code"].(string)
+			}
+		}
+		return nil, &soapFault{msg: msg, code: code}
 	}
 	return out.Body, nil
 }
@@ -163,22 +186,126 @@ func PingZimbra(ctx context.Context, base string) (time.Duration, error) {
 	return 0, err
 }
 
-func zimbraAuth(base, user, pass string) (string, error) {
-	body, err := soapCall(context.Background(), base, "", map[string]any{"AuthRequest": map[string]any{
+func parseZimbraLifetime(v any) time.Duration {
+	const defaultLifetime = time.Hour
+	var ms int64
+	switch val := v.(type) {
+	case float64:
+		ms = int64(val)
+	case string:
+		ms, _ = strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+	}
+	if ms <= 0 {
+		return defaultLifetime
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func zimbraAuthContext(ctx context.Context, base, user, pass string) (string, time.Duration, error) {
+	body, err := soapCall(ctx, base, "", map[string]any{"AuthRequest": map[string]any{
 		"_jsns":    "urn:zimbraAccount",
 		"account":  map[string]any{"_content": user, "by": "name"},
 		"password": map[string]any{"_content": pass},
 	}})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	ar, _ := body["AuthResponse"].(map[string]any)
 	tokens, _ := ar["authToken"].([]any)
 	if len(tokens) == 0 {
-		return "", errors.New("pas de authToken dans la réponse")
+		return "", 0, errors.New("pas de authToken dans la réponse")
 	}
-	t, _ := tokens[0].(map[string]any)["_content"].(string)
-	return t, nil
+	tokObj, _ := tokens[0].(map[string]any)
+	t, _ := tokObj["_content"].(string)
+	if t == "" {
+		return "", 0, errors.New("authToken vide dans la réponse")
+	}
+	return t, parseZimbraLifetime(ar["lifetime"]), nil
+}
+
+func zimbraAuth(base, user, pass string) (string, error) {
+	t, _, err := zimbraAuthContext(context.Background(), base, user, pass)
+	return t, err
+}
+
+// AutoCompleteContact représente un contact renvoyé par AutoCompleteRequest.
+type AutoCompleteContact struct {
+	Email       string
+	DisplayName string
+	FirstName   string
+	LastName    string
+}
+
+func stringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+func zimbraAutoComplete(ctx context.Context, base, token, query string) ([]AutoCompleteContact, error) {
+	body, err := soapCall(ctx, base, token, map[string]any{
+		"AutoCompleteRequest": map[string]any{
+			"_jsns":      "urn:zimbraMail",
+			"name":       query,
+			"includeGal": 1,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	ar, _ := body["AutoCompleteResponse"].(map[string]any)
+	matches, _ := ar["match"].([]any)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(matches))
+	contacts := make([]AutoCompleteContact, 0, len(matches))
+	for _, raw := range matches {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawEmail := stringField(m, "email")
+		if rawEmail == "" {
+			continue
+		}
+		parsed, err := mail.ParseAddress(rawEmail)
+		if err != nil || !strings.Contains(parsed.Address, "@") {
+			continue
+		}
+		key := strings.ToLower(parsed.Address)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		first := stringField(m, "first")
+		last := stringField(m, "last")
+		display := stringField(m, "display")
+		if display == "" {
+			display = strings.TrimSpace(first + " " + last)
+		}
+		if display == "" {
+			display = strings.TrimSpace(parsed.Name)
+		}
+		if display == "" {
+			display = parsed.Address
+		}
+		if first == "" && last == "" && display != parsed.Address {
+			if parts := strings.Fields(display); len(parts) >= 2 {
+				first = parts[0]
+				last = strings.Join(parts[1:], " ")
+			}
+		}
+
+		contacts = append(contacts, AutoCompleteContact{
+			Email:       parsed.Address,
+			DisplayName: display,
+			FirstName:   first,
+			LastName:    last,
+		})
+	}
+	return contacts, nil
 }
 
 var aidRe = regexp.MustCompile(`'([^']*)'\s*$`)

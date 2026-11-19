@@ -14,13 +14,17 @@ import (
 const appID = "ZimbraSmtpProxy"
 
 type Config struct {
-	ZimbraURL  string `json:"zimbra_url"`
-	ListenPort int    `json:"listen_port"`
+	ZimbraURL   string `json:"zimbra_url"`
+	ListenPort  int    `json:"listen_port"`
+	LDAPEnabled bool   `json:"ldap_enabled"`
+	LDAPPort    int    `json:"ldap_port"`
 }
 
 var defaultConfig = Config{
-	ZimbraURL:  "https://mail-etu.esisar.grenoble-inp.fr",
-	ListenPort: 1025,
+	ZimbraURL:   "https://mail-etu.esisar.grenoble-inp.fr",
+	ListenPort:  1025,
+	LDAPEnabled: true,
+	LDAPPort:    3890,
 }
 
 // dataDir renvoie %APPDATA%\ZimbraSmtpProxy (config + journal).
@@ -55,6 +59,15 @@ func loadConfig() Config {
 	}
 	if validPort(cfg.ListenPort) != nil {
 		cfg.ListenPort = defaultConfig.ListenPort
+	}
+	if validPort(cfg.LDAPPort) != nil {
+		cfg.LDAPPort = defaultConfig.LDAPPort
+	}
+	if cfg.LDAPPort == cfg.ListenPort {
+		cfg.LDAPPort = defaultConfig.LDAPPort
+		if cfg.LDAPPort == cfg.ListenPort {
+			cfg.LDAPPort = 3891
+		}
 	}
 	return cfg
 }

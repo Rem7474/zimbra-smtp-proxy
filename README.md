@@ -6,11 +6,14 @@
 
 **[Site et téléchargements](https://rem7474.github.io/zimbra-smtp-proxy/)**
 
-Passerelle SMTP locale (`127.0.0.1:1025`) qui relaie les mails de Thunderbird
-vers l'API SOAP de Zimbra, pour les serveurs dont le SMTP n'est pas exposé.
+Passerelle SMTP (`127.0.0.1:1025`) et annuaire LDAP local (`127.0.0.1:3890`) qui
+relient Thunderbird à l'API SOAP de Zimbra, pour les serveurs dont le SMTP
+n'est pas exposé et pour l'autocomplétion des destinataires.
 
 Le message MIME est transmis tel quel (upload brut + `SendMsgRequest` avec
 `aid`) : pièces jointes, HTML, Cc, Cci et en-têtes de fil sont conservés.
+L'annuaire LDAP traduit les recherches d'autocomplétion en appels
+`AutoCompleteRequest` (contacts personnels + GAL) avec mise en cache en mémoire.
 
 ## Zone de notification
 
@@ -30,10 +33,11 @@ perte et le retour de la connexion.
 ![Fenêtre de configuration](site/config-window.png)
 
 Page HTML (`ui/settings.html`) affichée par Microsoft Edge WebView2, présent
-sur Windows 10 et 11 : état en direct, adresse Zimbra (testée avant
-enregistrement), port d'écoute, lancement à l'ouverture de session, réglages
-Thunderbird et journal. Elle suit le thème clair/sombre de Windows. Ouvert
-dans un navigateur, le fichier affiche un aperçu avec des données fictives.
+sur Windows 10 et 11 : état en direct (SMTP, LDAP et Zimbra), adresse Zimbra
+(testée avant enregistrement), ports d'écoute SMTP et LDAP, activation de
+l'annuaire LDAP, lancement à l'ouverture de session, réglages Thunderbird et
+journal. Elle suit le thème clair/sombre de Windows. Ouvert dans un navigateur,
+le fichier affiche un aperçu avec des données fictives.
 `zimbra-smtp-proxy.exe --settings` ouvre la fenêtre dès le démarrage.
 
 Configuration et journal : `%APPDATA%\ZimbraSmtpProxy\` (`config.json`,
@@ -41,9 +45,14 @@ Configuration et journal : `%APPDATA%\ZimbraSmtpProxy\` (`config.json`,
 
 ## Thunderbird
 
-Serveur sortant : `127.0.0.1`, port `1025`, sécurité « Aucune »,
-authentification « Mot de passe normal », identifiant = adresse Zimbra.
-Décocher « Placer une copie dans Envoyés » : Zimbra l'enregistre déjà.
+- **Envoi (SMTP)** : `127.0.0.1`, port `1025`, sécurité « Aucune »,
+  authentification « Mot de passe normal », identifiant = adresse Zimbra.
+  Décocher « Placer une copie dans Envoyés » : Zimbra l'enregistre déjà.
+- **Autocomplétion (LDAP)** : Paramètres → Rédaction → Adressage → cocher
+  « Serveur d'annuaire » → Modifier les annuaires → Ajouter : hôte `127.0.0.1`,
+  port `3890`, Base DN `dc=zimbra,dc=local`, Bind DN = adresse Zimbra complète,
+  SSL décoché. Au premier destinataire saisi, Thunderbird demande le mot de
+  passe Zimbra et le mémorise.
 
 ## Build
 
@@ -89,6 +98,7 @@ git push origin v1.0.1
 | `ui_windows.go` | Fenêtre WebView2 et pont JavaScript ↔ Go |
 | `ui/settings.html` | Interface de la fenêtre de configuration |
 | `gateway.go` | Serveur SMTP et client SOAP Zimbra |
+| `ldap.go` | Serveur LDAP local d'autocomplétion (contacts + GAL) |
 | `config.go` | Lecture/écriture de `config.json` |
 | `platform_windows.go` | Instance unique, démarrage auto (clé `Run`) |
 | `internal/icon` | Icônes dessinées à l'exécution (pas d'image embarquée) |

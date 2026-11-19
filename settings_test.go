@@ -17,11 +17,28 @@ func newTestApp(t *testing.T, zimbraURL string) *app {
 	t.Setenv("XDG_CONFIG_HOME", dir) // Linux
 	t.Setenv("APPDATA", dir)         // Windows
 	t.Setenv("HOME", dir)            // macOS
-	a := &app{cfg: Config{ZimbraURL: zimbraURL, ListenPort: freePort(t)}, gw: NewGateway(zimbraURL)}
+	smtpPort := freePort(t)
+	ldapPort := freePort(t)
+	for ldapPort == smtpPort {
+		ldapPort = freePort(t)
+	}
+	a := &app{
+		cfg: Config{
+			ZimbraURL:   zimbraURL,
+			ListenPort:  smtpPort,
+			LDAPEnabled: true,
+			LDAPPort:    ldapPort,
+		},
+		gw:   NewGateway(zimbraURL),
+		ldap: NewLDAPServer(zimbraURL),
+	}
 	if err := a.startGateway(a.cfg.ListenPort); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(a.gw.Stop)
+	if err := a.startLDAP(a.cfg.LDAPPort); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.stopAll)
 	return a
 }
 
@@ -126,11 +143,110 @@ func TestSavePortRestartsGateway(t *testing.T) {
 
 func TestToggleGateway(t *testing.T) {
 	a := newTestApp(t, "https://old.example")
-	port := a.cfg.ListenPort
-	if s := callUI(t, a, "toggle", nil).(uiState); s.Running || listening(port) {
-		t.Fatalf("toggle devait arrêter la passerelle : %+v", s)
+	port, ldapPort := a.cfg.ListenPort, a.cfg.LDAPPort
+	if s := callUI(t, a, "toggle", nil).(uiState); s.Running || s.LDAPRunning || listening(port) || listening(ldapPort) {
+		t.Fatalf("toggle devait arrêter les deux serveurs : %+v", s)
 	}
-	if s := callUI(t, a, "toggle", nil).(uiState); !s.Running || !listening(port) {
-		t.Fatalf("toggle devait redémarrer la passerelle : %+v", s)
+	if s := callUI(t, a, "toggle", nil).(uiState); !s.Running || !s.LDAPRunning || !listening(port) || !listening(ldapPort) {
+		t.Fatalf("toggle devait redémarrer les deux serveurs : %+v", s)
+	}
+}
+
+func TestSaveLDAPSettingsAndValidation(t *testing.T) {
+	a := newTestApp(t, "https://old.example")
+	smtpPort := a.cfg.ListenPort
+	ldapPort := a.cfg.LDAPPort
+
+	// Rejet port LDAP identique au port SMTP ou hors bornes.
+	for _, badPort := range []int{smtpPort, 80} {
+		res := callUI(t, a, "save", saveRequest{
+			ZimbraURL:   "https://old.example",
+			Port:        smtpPort,
+			LDAPEnabled: true,
+			LDAPPort:    badPort,
+		}).(saveResult)
+		if res.OK || res.Field != "ldapPort" {
+			t.Errorf("save(ldapPort=%d) = %+v, attendu erreur sur ldapPort", badPort, res)
+		}
+	}
+
+	// Désactivation LDAP.
+	res := callUI(t, a, "save", saveRequest{
+		ZimbraURL:   "https://old.example",
+		Port:        smtpPort,
+		LDAPEnabled: false,
+		LDAPPort:    ldapPort,
+	}).(saveResult)
+	if !res.OK || res.State.LDAPRunning || listening(ldapPort) || !listening(smtpPort) {
+		t.Fatalf("désactivation LDAP : %+v", res)
+	}
+
+	// Réactivation sur un nouveau port.
+	ldapPort2 := freePort(t)
+	res = callUI(t, a, "save", saveRequest{
+		ZimbraURL:   "https://old.example",
+		Port:        smtpPort,
+		LDAPEnabled: true,
+		LDAPPort:    ldapPort2,
+	}).(saveResult)
+	if !res.OK || !res.State.LDAPRunning || !listening(ldapPort2) {
+		t.Fatalf("réactivation LDAP : %+v", res)
+	}
+
+	// Port LDAP déjà pris : erreur + retour sur ldapPort2.
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	busyPort := busy.Addr().(*net.TCPAddr).Port
+	res = callUI(t, a, "save", saveRequest{
+		ZimbraURL:   "https://old.example",
+		Port:        smtpPort,
+		LDAPEnabled: true,
+		LDAPPort:    busyPort,
+	}).(saveResult)
+	if res.OK || res.Field != "ldapPort" {
+		t.Fatalf("port LDAP occupé : %+v", res)
+	}
+	if !listening(ldapPort2) || a.cfg.LDAPPort != ldapPort2 || a.ldapPortError() != "" {
+		t.Errorf("LDAP n'est pas revenu sur le port %d", ldapPort2)
+	}
+
+	// Échange des ports SMTP et LDAP.
+	res = callUI(t, a, "save", saveRequest{
+		ZimbraURL:   "https://old.example",
+		Port:        ldapPort2,
+		LDAPEnabled: true,
+		LDAPPort:    smtpPort,
+	}).(saveResult)
+	if !res.OK || !res.State.Running || !res.State.LDAPRunning || !listening(ldapPort2) || !listening(smtpPort) {
+		t.Fatalf("échange de ports SMTP/LDAP : %+v", res)
+	}
+}
+
+func TestLoadConfigBackwardCompatible(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("APPDATA", dir)
+	t.Setenv("HOME", dir)
+
+	if err := os.MkdirAll(dataDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath(), []byte(`{"zimbra_url":"https://mail.ex.fr","listen_port":2025}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadConfig()
+	if cfg.ZimbraURL != "https://mail.ex.fr" || cfg.ListenPort != 2025 || !cfg.LDAPEnabled || cfg.LDAPPort != 3890 {
+		t.Errorf("rétrocompatibilité config : %+v", cfg)
+	}
+
+	if err := os.WriteFile(configPath(), []byte(`{"zimbra_url":"https://mail.ex.fr","listen_port":3890}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := loadConfig()
+	if cfg2.LDAPPort != 3891 {
+		t.Errorf("collision port LDAP/SMTP = %d, attendu 3891", cfg2.LDAPPort)
 	}
 }
