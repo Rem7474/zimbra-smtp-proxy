@@ -68,7 +68,9 @@ Prérequis : Go (version de `go.mod`), Inno Setup 6 (ou Docker pour `build.sh`).
 Produit `dist/zimbra-smtp-proxy.exe` et `dist/ZimbraSmtpProxy-Setup.exe`.
 
 L'installeur s'installe par utilisateur, sans droits administrateur, dans
-`%LOCALAPPDATA%\Programs\ZimbraSmtpProxy`. Installation silencieuse :
+`%LOCALAPPDATA%\Programs\ZimbraSmtpProxy`. Une réinstallation met à jour
+l'exécutable en place tout en conservant `%APPDATA%\ZimbraSmtpProxy\config.json`.
+Installation silencieuse :
 `ZimbraSmtpProxy-Setup.exe /VERYSILENT /TASKS=autostart`.
 
 ## CI/CD
@@ -104,5 +106,5 @@ git push origin v1.0.1
 | `internal/icon` | Icônes dessinées à l'exécution (pas d'image embarquée) |
 | `tools/genicon` | Génère `winres/icon.png` et `installer/app.ico` |
 | `installer/setup.iss` | Script Inno Setup |
-| `scripts/smoke-test.ps1` | Test d'installation / SMTP / désinstallation (CI) |
+| `scripts/smoke-test.ps1` | Test d'installation / SMTP / LDAP / désinstallation (CI) |
 | `site/` | Site GitHub Pages |

@@ -1,4 +1,4 @@
-# Compile l'exe et l'installeur sous Windows.
+﻿# Compile l'exe et l'installeur sous Windows.
 # Prérequis : Go (version de go.mod), Inno Setup 6 (https://jrsoftware.org/isdl.php)
 # Usage : .\build.ps1 [-Version 1.2.3]
 param([string]$Version = "0.0.0")
@@ -15,7 +15,7 @@ Invoke-Step { go test ./... }
 Invoke-Step { go run ./tools/genicon }
 Invoke-Step { go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --manifest gui `
   --icon winres/icon.png --product-name "Zimbra SMTP Proxy" `
-  --file-description "Passerelle SMTP locale vers Zimbra" `
+  --file-description "Passerelle SMTP et annuaire LDAP locaux vers Zimbra" `
   --product-version $Version --file-version $Version `
   --original-filename zimbra-smtp-proxy.exe }
 $env:GOOS = "windows"; $env:GOARCH = "amd64"; $env:CGO_ENABLED = "0"

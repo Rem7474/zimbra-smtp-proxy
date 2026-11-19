@@ -10,7 +10,7 @@ go test ./...
 go run ./tools/genicon
 go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --manifest gui \
   --icon winres/icon.png --product-name "Zimbra SMTP Proxy" \
-  --file-description "Passerelle SMTP locale vers Zimbra" \
+  --file-description "Passerelle SMTP et annuaire LDAP locaux vers Zimbra" \
   --product-version "$VERSION" --file-version "$VERSION" \
   --original-filename zimbra-smtp-proxy.exe
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \

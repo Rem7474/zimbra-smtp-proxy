@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Zimbra SMTP Proxy</title>
-<meta name="description" content="Passerelle SMTP locale pour Thunderbird qui envoie vos mails via l'API de Zimbra quand le SMTP du serveur n'est pas accessible.">
+<meta name="description" content="Passerelle SMTP et annuaire LDAP locaux pour Thunderbird : envoi de mails et autocomplétion des contacts via l'API SOAP de Zimbra.">
 <meta property="og:title" content="Zimbra SMTP Proxy">
-<meta property="og:description" content="Envoyer ses mails Zimbra depuis Thunderbird sans accès au SMTP du serveur.">
+<meta property="og:description" content="Envoyer ses mails et autocompléter ses contacts Zimbra depuis Thunderbird via l'API SOAP.">
 <meta property="og:image" content="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
 <meta name="color-scheme" content="light dark">
@@ -142,7 +142,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <div>
       <div class="eyebrow"><span id="version">Dernière version</span> · Windows 10/11 x64</div>
       <h1>Zimbra SMTP Proxy</h1>
-      <p class="lede">Passerelle SMTP locale pour Thunderbird qui envoie vos mails via l'API SOAP de Zimbra quand le SMTP du serveur n'est pas accessible.</p>
+      <p class="lede">Passerelle SMTP et annuaire LDAP locaux pour Thunderbird : envoi de mails et autocomplétion des contacts via l'API SOAP de Zimbra.</p>
     </div>
   </header>
 
@@ -207,8 +207,8 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <div class="window">
       <img src="config-window.png" width="560" height="652" alt="Fenêtre de configuration : état de la passerelle et de Zimbra, adresse du serveur Zimbra, port d'écoute, lancement à l'ouverture de session, aide Thunderbird">
       <ul class="points">
-        <li>État de la passerelle et de Zimbra en direct, avec démarrage/arrêt et test de connexion.</li>
-        <li>Adresse du serveur Zimbra, port d'écoute et lancement à l'ouverture de session. Une nouvelle adresse est testée avant d'être enregistrée.</li>
+        <li>État de la passerelle (SMTP et LDAP) et de Zimbra en direct, avec démarrage/arrêt et test de connexion.</li>
+        <li>Adresse du serveur Zimbra, ports d'écoute SMTP et LDAP, activation de l'annuaire LDAP et lancement à l'ouverture de session. Une nouvelle adresse est testée avant d'être enregistrée.</li>
         <li>Réglages Thunderbird à copier et accès au journal.</li>
         <li>Suit le thème clair ou sombre de Windows. Utilise Microsoft Edge WebView2, déjà présent sur Windows 10 et 11.</li>
       </ul>
