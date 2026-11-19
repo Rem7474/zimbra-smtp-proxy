@@ -330,9 +330,9 @@ function fillForm(v) {
 function formValues() {
   return {
     zimbraURL: $("url").value.trim(),
-    port: parseInt($("port").value, 10) || 0,
+    port: Number.parseInt($("port").value, 10) || 0,
     ldapEnabled: $("ldap-enabled").checked,
-    ldapPort: parseInt($("ldapPort").value, 10) || 0,
+    ldapPort: Number.parseInt($("ldapPort").value, 10) || 0,
     autostart: $("autostart").checked,
   };
 }
