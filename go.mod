@@ -5,12 +5,12 @@ go 1.26.0
 require (
 	fyne.io/systray v1.12.2
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
-	github.com/emersion/go-smtp v0.25.0
+	github.com/emersion/go-smtp v0.26.0
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/ncruces/zenity v0.10.15
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
